@@ -1,0 +1,31 @@
+.user_group_container {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    box-shadow: rgba(17, 12, 46, 0.15) 0px 48px 100px 0px;
+    background-color: white;
+    border-radius: 10px;
+    text-align-last: left;
+}
+
+.center_flex_item {
+    display: flex;
+    align-items: center;
+}
+
+.hidden-add-button {
+    width: auto;
+}
+
+.user_container .hidden-add-button {
+    visibility: hidden;
+}
+
+.user_container:hover .hidden-add-button{
+    visibility: visible;
+}
+
+.all-users {
+    max-height: 200px;
+    overflow-y: scroll;
+}

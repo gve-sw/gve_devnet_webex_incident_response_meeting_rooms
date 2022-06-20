@@ -1,0 +1,415 @@
+{% extends 'base.html' %}
+
+
+
+
+{% block content %}
+
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"> </script>
+
+<script type=text/javascript>
+
+function addExternal(externalID)
+{
+    console.log("Passing external ID: ", externalID);
+    // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to AddExternal
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('AddExternal') }}"+"?ext_id="+externalID;
+            });
+   return false;
+}
+
+function delMember(memberID)
+{
+   console.log("Passing member ID: ", memberID);
+
+    // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to DelMember
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('DelMember') }}"+"?mem_id="+memberID;
+            });
+   return false;
+
+}
+
+function addMember(memberPersonID)
+{
+    console.log("Passing member ID: ", memberPersonID);
+
+    // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to AddMember
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('AddMember') }}"+"?mem_id="+memberPersonID;
+            });
+   return false;
+
+}
+
+function stopAndPurge()
+{
+    console.log("Stopping conference and purging space...");
+    window.location.href="{{ url_for('end_conference') }}"
+}
+function startConference()
+{
+    console.log("Starting conference ...");
+
+    let incident_name=document.getElementById('incident-name').value
+    window.open("{{ url_for('start_conference') }}"+"?inc_name="+incident_name,"_blank");
+
+}
+function selectNewSpace()
+{
+   console.log("Done, select another space...");
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('started') }}";
+            });
+   return false;
+}
+
+function addMultipleMembers(addMButton)
+{
+    console.log("Clicked on add multiple members button id: ",addMButton.id);
+}
+function selectAllMembers(selectAButton)
+{
+    console.log("Clicked on add select all members button id: ",selectAButton.id);
+}
+
+</script>
+<!-- For testing below comment -->
+<!-- <div class="show-grid" style="padding:24px"> -->
+
+<div class="" style="padding:24px; box-sizing: border-box; background-color: #f7f7f7">
+    <h1 class="point" style="text-align:center">{{space_name}}</h1>
+
+
+    <div id="addExtModal" class="md-modal__backdrop fade in" style="display:none">
+  <div
+    role="dialog"
+    id="react-aria-modal-dialog"
+    class="md-modal md-modal--small in"
+    aria-labelledby="modal3"
+  >
+    <div class="md-modal__content">
+      <div class="md-modal__flex-container">
+        <div class="md-modal__header">
+          <span class="md-modal__title">Add External Responder</span>
+        </div>
+        <div class="md-modal__body">
+            <form>
+                    <!-- Form Area -->
+        <div class="medium-5 columns ">
+            <div class="md-input-group">
+                <label class="md-label" for="ext-name">Name</label>
+                <input class="md-input" id="ext-name" name="ext_name" type="text" value="">
+                <label class="md-label" for="ext-mobile">Mobile number</label>
+                <input class="md-input" id="ext-mobile" name="ext-mobile" type="text" value="">
+                <label class="md-label" for="ext-email">Email</label>
+                <input class="md-input" id="ext-email" name="ext_email" type="text" value="">
+                <label class="md-label" for="ext-voice">Voice number</label>
+                <input class="md-input" id="ext-voice" name="ext_voice" type="text" value="">
+            </div>
+        </div><!-- .medium-6 .columns -->
+        </form>
+        </div>
+        <div class="md-modal__footer">
+          <button
+                  id="cancel_ext"
+                  class="md-button md-button--36 md-button--default"
+                  alt="Close Modal"
+                  type="button"
+                  aria-label="Close Modal"
+          >
+            <span class="md-button__children" style="opacity: 1;">Cancel</span>
+          </button>
+          <button
+                  id="ok_ext"
+            class="md-button md-button--36 md-button--blue"
+            alt="Submit Form"
+            type="button"
+            aria-label="Submit Form"
+          >
+            <span class="md-button__children" style="opacity: 1;">OK</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+    <!-- header row includes incident name and SMS Origin -->
+    <div class="row space_stack_large" style="margin-bottom: 32px;">
+
+        <!-- Incident Name Area -->
+        <div class="medium-5 columns ">
+            <div class="md-input-group">
+                <label class="md-label" for="incident-name">Incident name</label>
+                <input class="md-input" id="incident-name" name="incident_name" type="text" value="{{inc_name}}">
+            </div>
+        </div><!-- .medium-6 .columns -->
+
+        <!-- General SMS Area -->
+        <div class="medium-5 columns">
+            <div class="md-input-group">
+                <label class="md-label" for="readonlyInput">General SMS origin</label>
+                <input class="md-input" id="readonlyInput" type="text" style="background-color: #EBFCFF;"
+                    value="{{smsorigin}}" readonly>
+            </div>
+        </div><!-- .medium-6 .columns -->
+
+    </div><!-- .row-6 -->
+
+    <!-- Internal Responders -->
+    <div class="row">
+        <div class="medium-5 columns" style="margin-bottom: 32px">
+            <div class="row">
+                <h3>Available internal responders</h3>
+                <div class="column user_group_container">
+                    <div class="md-input-container">
+                        <div class="md-input__wrapper">
+                            <span class="md-input__before">
+                                <i class="md-icon icon icon-search_20" style="font-size: 20px;"></i>
+                            </span>
+                            <input class="md-input md-input--before" tabindex="0" type="text" aria-autocomplete="list"
+                                value="">
+                        </div>
+                    </div><!-- md-input-container -->
+
+                    <div class="all-users">
+
+                        {% for tmember in team %}
+
+                        <div class="user_container center_flex_item">
+                            <div style="flex: 1">
+                                 <!--
+                                 style="display: grid;
+                            grid-template-columns: 20px 30px 200px;
+                            grid-column-gap: 12px;
+                            grid-row-gap: 12px;
+                            align-items: center;" -->
+
+                                <!--
+                                <input id="basic-checkbox" name="all-internal_responders[]" type="checkbox" class="md-input md-checkbox__input" value="{{tmember.personId}}">
+                                -->
+                                <div class="md-avatar md-avatar--44" title="{{tmember.personDisplayName}}">
+                                    <span class="md-avatar__letter">{{tmember.personInitials}}</span>
+                                </div>
+
+                                <span style="margin-left: 8px">{{tmember.personDisplayName}}</span>
+                            </div>
+
+                            <div class="md-button__container--small hidden-add-button">
+                                <button onclick="addMember('{{tmember.personId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                    alt="add user" type="button" aria-label="add user">
+                                    <span class="md-button__children">
+                                        <i class="icon icon-plus-circle_24"></i>
+                                    </span>
+                                </button>
+                            </div>
+
+                        </div>
+
+                        {% endfor %}
+
+                    </div><!-- .all-users -->
+                    <!-- Only add these buttons below once I can put them side by side!
+                    <div class="md-button__container--small" style="float:left;">
+                        <button onclick="selectAllMembers(this)" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                            alt="select all" type="button" aria-label="select all">
+                            <span class="md-button__children">
+                                <i class="icon icon-check-circle_24" ></i>
+                            </span>
+                        </button>
+                        <button onclick="addMultipleMembers(this)" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                            alt="add user" type="button" aria-label="add user">
+                            <span class="md-button__children">
+                                <i class="icon icon-plus-circle_24"></i>
+                            </span>
+                        </button>
+                    </div>
+                    -->
+                </div><!-- .user_group_container -->
+            </div><!-- .row -->
+
+            <!-- Spacer -->
+            <div class="row">
+                <div class="column"></div>
+            </div>
+
+        </div> <!-- Available Internal Responders column -->
+
+        <!-- Available External Responders Column -->
+        <div class="medium-5 columns" style="margin-bottom: 32px">
+            <div class="row">
+                <h3>Available external responders</h3>
+                <div class="column user_group_container">
+                    <div class="md-input-container">
+                        <div class="md-input__wrapper">
+                            <span class="md-input__before">
+                                <i class="md-icon icon icon-search_20" style="font-size: 20px;"></i>
+                            </span>
+                            <input class="md-input md-input--before" tabindex="0" type="text" aria-autocomplete="list"
+                                value="">
+                            <button id="addExtBtn" class="md-input__after" style="border: none">
+                                <i class="md-icon icon icon-participant-add_20" style="font-size: 20px;"></i>
+                            </button>
+                        </div>
+
+                    </div>
+
+                    <div class="all-users">
+
+                    {% for external in externals %}
+
+                    <div class="user_container center_flex_item">
+                        <div style="flex: 1">
+                            <div class="md-avatar md-avatar--44" title="{{external.extName}}">
+                                <span class="md-avatar__letter">{{external.personInitials}}</span>
+                            </div>
+
+                            <span style="margin-left: 8px">{{external.extName}} {% if external.extMobile != None %} {{external.extMobile}} {% else %} {{external.extVoice}} {% endif %} </span>
+                        </div>
+
+                        <div class="md-button__container--small hidden-add-button">
+                                <button onclick="addExternal('{{external.extID}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                    alt="add user" type="button" aria-label="add user">
+                                    <span class="md-button__children">
+                                        <i class="icon icon-plus-circle_24"></i>
+                                    </span>
+                                </button>
+                        </div>
+
+                    </div>
+
+                    {% endfor %}
+
+
+                    </div><!-- all-users -->
+                </div><!-- .user_group_container -->
+            </div><!-- .row -->
+        </div> <!-- Available External Responders Column -->
+    </div><!-- .row -->
+
+    <!-- TODO -->
+    <div class="row" style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
+        <div class="medium-8 columns" style="text-align: center">
+            <h3>Incident responders in Space</h3>
+
+            <!-- ADD ALL RESPONDERS USERS HERE -->
+
+            <div class="column user_group_container" style="flex: 1">
+                <div class="all-users">
+                    {% for member in members %}
+
+                    <div class="user_container center_flex_item">
+                        <div style="flex: 1">
+                            <div class="md-avatar md-avatar--44" title="{{member.personDisplayName}}">
+                                <span class="md-avatar__letter">{{member.personInitials}}</span>
+                            </div>
+
+                            <span style="margin-left: 8px">{{member.memberDisplayName}}  {{member.memberMobile}}</span>
+                        </div>
+
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="delMember('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="add user" type="button" aria-label="add user" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-delete_24" style="color: #f7644a"></i>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {% endfor %}
+
+                </div><!-- all-users -->
+            </div><!-- .user_group_container -->
+        </div>
+        <!-- Action Buttons -->
+        <button onclick="startConference()" type="button" class="md-button md-button--green" style="margin: 8px 0">Start Conference</button>
+        <button onclick="stopAndPurge()" type="button" class="md-button md-button--red" style="margin: 8px 0">Stop & Purge Conference</button>
+        <button onclick="selectNewSpace()" type="button" class="md-button md-button--grey" style="margin: 8px 0">Done</button>
+
+    </div>
+
+</div>
+<script>
+
+    // Get the modal
+var modal = document.getElementById("addExtModal");
+
+// Get the button that opens the modal
+var add_ext_btn = document.getElementById('addExtBtn');
+
+// Get the <span> element that closes the modal
+//var span = document.getElementsByClassName("close")[0];
+var cancel_btn=document.getElementById('cancel_ext');
+var ok_btn=document.getElementById('ok_ext');
+// When the user clicks the button, open the modal
+add_ext_btn.onclick = function() {
+  modal.style.display = "block";
+}
+
+// When the user clicks on Cancel, clear out data and close the modal
+cancel_btn.onclick = function() {
+  modal.style.display = "none";
+    document.getElementById('ext-name').value=""
+    document.getElementById('ext-mobile').value=""
+    document.getElementById('ext-email').value=""
+    document.getElementById('ext-voice').value=""
+}
+
+// When the user clicks on Ok, retrieve data, create external user
+// and close the modal
+ok_btn.onclick = function() {
+
+    the_name=document.getElementById('ext-name').value
+    the_mobile=document.getElementById('ext-mobile').value
+    the_email=document.getElementById('ext-email').value
+    the_voice=document.getElementById('ext-voice').value
+    console.log("Creating element with: ",the_name,the_mobile,the_email,the_voice);
+     modal.style.display = "none";
+     // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to AddMember
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('AddNewExternal') }}"+"?ext_name="+encodeURIComponent(the_name)
+                                                                    +"&ext_mobile="+encodeURIComponent(the_mobile)
+                                                                    +"&ext_email="+encodeURIComponent(the_email)
+                                                                    +"&ext_voice="+encodeURIComponent(the_voice);
+            });
+   return false;
+}
+
+// When the user clicks anywhere outside of the modal, close it
+window.onclick = function(event) {
+  if (event.target == modal) {
+    modal.style.display = "none";
+  }
+}
+
+</script>
+{% endblock %}

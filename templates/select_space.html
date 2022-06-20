@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="" style="padding:24px; box-sizing: border-box; background-color: #f7f7f7">
+
+    <p>
+    <strong>Welcome {{moderatorName}}</strong>
+    </p>
+
+    <br>
+    <form class="form-inline" method="POST" action="{{ url_for('space_selected') }}">
+      <div class="form-group">
+        <div class="input-group">
+            <span class="input-group-addon">Please select one of your moderated spaces: </span>
+        <select name="space_select" multiple>
+            {% for space in moderatedRooms %}
+            <option value="{{space.id}}">{{space.title}}</option>
+            {% endfor %}
+
+        </select>
+        </div>
+          <br>
+        <button type="submit" class="btn btn-default">Select</button>
+      </div>
+    </form>
+    <br>
+</div>
+{% endblock %}
