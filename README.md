@@ -66,6 +66,9 @@ Copy the Webex Connect (IMI) Service key for your account or sandbox here.
 **SMS_ORIGIN**  
 Specify the originating Webex Connect phone number for sending SMS here  
 
+**VOICE_ORIGIN**
+Specify the originating Webex Connect phone number for making notification voice calls here
+
 **TEAM_NAME** 
 Specify name of Webex Team from which to obtain members to offer as available responders 
 
