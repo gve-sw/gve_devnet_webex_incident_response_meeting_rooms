@@ -375,7 +375,7 @@ def start_conference():
         if os.getenv('IMI_SERVICE_KEY')!="":
             #send message via SMS to mobile number (if available)
             if responder.mobilenumber!=None and responder.mobilenumber!="":
-                print(f'Sending SMS to {responder.name}')
+                print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
                 url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
                 payload = json.dumps({
                     "from": os.getenv('SMS_ORIGIN'),
@@ -385,11 +385,11 @@ def start_conference():
                 })
                 headers = {
                     'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json',
-                    'Idempotency-Key': '{{optional- Idempotency-Key}}'
+                    'Content-Type': 'application/json'
                 }
                 response = requests.request("POST", url, headers=headers, data=payload)
                 print("Sent SMS: ",response.text)
+                time.sleep(2)
 
             # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
             if responder.voicenumber!=None and responder.voicenumber!="":
@@ -410,11 +410,11 @@ def start_conference():
                 })
                 headers = {
                     'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json',
-                    'Idempotency-Key': '{{optional- Idempotency-Key}}'
+                    'Content-Type': 'application/json'
                 }
                 response = requests.request("POST", url, headers=headers, data=payload)
                 print("Made voice call: ",response.text)
+                time.sleep(2)
     # redirect to link to launch the meeting
     return redirect(rmMtgInfo.meetingLink)
 
