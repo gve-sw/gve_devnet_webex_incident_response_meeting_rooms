@@ -41,6 +41,7 @@ function delMember(memberID)
 
 }
 
+
 function addMember(memberPersonID)
 {
     console.log("Passing member ID: ", memberPersonID);
@@ -56,6 +57,92 @@ function addMember(memberPersonID)
             });
    return false;
 
+}
+
+
+function smsToggleActivate(memberID)
+{
+   console.log("Passing member ID: ", memberID);
+  $.getJSON('/toggleSendSMS',
+      { mem_id: memberID },
+      function(data) {
+       console.log(data.result.toggle_result);
+       if (data.result.toggle_result!='Unchanged')
+       {
+           let toggle_icon=document.getElementById('SMSToggle'+memberID);
+           console.log(`Toggle icon color: ${toggle_icon.style.color}`);
+           if (data.result.toggle_result=="Enabled")
+           {
+                toggle_icon.style.color="#00853C"
+           }
+           else
+           {
+                toggle_icon.style.color="#DEDEDE"
+           }
+       }
+
+    });
+   return false;
+}
+
+function voiceToggleActivate(memberID)
+{
+   console.log("Passing member ID: ", memberID);
+  $.getJSON('/toggleSendVoice',
+      { mem_id: memberID },
+      function(data) {
+       console.log(data.result.toggle_result);
+       if (data.result.toggle_result!='Unchanged')
+       {
+           let toggle_icon=document.getElementById('VoiceToggle'+memberID);
+           console.log(`Toggle icon color: ${toggle_icon.style.color}`);
+           if (data.result.toggle_result=="Enabled")
+           {
+                toggle_icon.style.color="#00853C"
+           }
+           else
+           {
+                toggle_icon.style.color="#DEDEDE"
+           }
+       }
+
+    });
+   return false;
+}
+
+
+function sendOneInvite(memberID)
+{
+   console.log("Passing member ID: ", memberID);
+   let incident_name=document.getElementById('incident-name').value
+  $.getJSON('/sendOneInvite',
+      { mem_id: memberID,
+        inc_name: incident_name},
+      function(data) {
+       console.log(data.result.send_invite_result);
+       if (data.result.send_invite_result=='NoneSent')
+       {
+            alert("Problems sending invite!");
+       }
+
+    });
+   return false;
+}
+
+function internalsKeypress(e)
+{
+    let search_string=document.getElementById("internalsInput").value;
+    let incident_name=document.getElementById('incident-name').value;
+    console.log(`A key was pressed, value: ${e.which}`);
+    if (e.which==13 && (search_string=='' || search_string.length>=3)) {
+       $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('UpdateInternalsList') }}"+"?search_str="+search_string;
+            });
+       return false;
+    }
 }
 
 function stopAndPurge()
@@ -190,7 +277,7 @@ function selectAllMembers(selectAButton)
                             <span class="md-input__before">
                                 <i class="md-icon icon icon-search_20" style="font-size: 20px;"></i>
                             </span>
-                            <input class="md-input md-input--before" tabindex="0" type="text" aria-autocomplete="list"
+                            <input class="md-input md-input--before" tabindex="0" type="text" id="internalsInput" onkeypress="internalsKeypress(event)" aria-autocomplete="list"
                                 value="">
                         </div>
                     </div><!-- md-input-container -->
@@ -216,6 +303,9 @@ function selectAllMembers(selectAButton)
                                 </div>
 
                                 <span style="margin-left: 8px">{{tmember.personDisplayName}}</span>
+                                {% if tmember.personPhoneMobile != "" %} <span style="margin-left: 8px"> M:{{tmember.personPhoneMobile}}</span> {% endif %}
+                                {% if tmember.personPhoneVoice != "" %} <span style="margin-left: 8px"> V:{{tmember.personPhoneVoice}}</span> {% endif %}
+
                             </div>
 
                             <div class="md-button__container--small hidden-add-button">
@@ -286,8 +376,11 @@ function selectAllMembers(selectAButton)
                             <div class="md-avatar md-avatar--44" title="{{external.extName}}">
                                 <span class="md-avatar__letter">{{external.personInitials}}</span>
                             </div>
-
+                            <!--
                             <span style="margin-left: 8px">{{external.extName}} {% if external.extMobile != None %} {{external.extMobile}} {% else %} {{external.extVoice}} {% endif %} </span>
+                            -->
+                            <span style="margin-left: 8px">{{external.extName}} {% if external.extMobile != None %} M:{{external.extMobile}} {% endif %} {% if external.extVoice != None %} V:{{external.extVoice}} {% endif %} </span>
+
                         </div>
 
                         <div class="md-button__container--small hidden-add-button">
@@ -297,6 +390,14 @@ function selectAllMembers(selectAButton)
                                         <i class="icon icon-plus-circle_24"></i>
                                     </span>
                                 </button>
+                        </div>
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="editExternal('{{external.extID}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="edit user" type="button" aria-label="edit user" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-edit_24" style="color: #121212"></i>
+                                </span>
+                            </button>
                         </div>
 
                     </div>
@@ -327,9 +428,36 @@ function selectAllMembers(selectAButton)
                                 <span class="md-avatar__letter">{{member.personInitials}}</span>
                             </div>
 
+                            <!--
                             <span style="margin-left: 8px">{{member.memberDisplayName}}  {{member.memberMobile}}</span>
-                        </div>
+                            -->
+                            <span style="margin-left: 8px">{{member.memberDisplayName}} {% if member.memberMobile != "" %} M:{{member.memberMobile}} {% endif %} {% if member.memberVoice != "" %} V:{{member.memberVoice}} {% endif %} </span>
 
+                        </div>
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="smsToggleActivate('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="activate sms" type="button" aria-label="activate sms" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-sms_16" id="SMSToggle{{member.memberId}}" style="color: {% if member.sendSMS %} #00853C {% else %} #DEDEDE {% endif %}"></i>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="voiceToggleActivate('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="activate voice" type="button" aria-label="activate voice" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-audio-call_16" id="VoiceToggle{{member.memberId}}" style="color: {% if member.sendVoice %} #00853C {% else %} #DEDEDE {% endif %}"></i>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="sendOneInvite('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="resend notification" type="button" aria-label="resend notification" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-send_24" style="color: #007AA3"></i>
+                                </span>
+                            </button>
+                        </div>
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="delMember('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
                                 alt="add user" type="button" aria-label="add user" style="background-color: white;">

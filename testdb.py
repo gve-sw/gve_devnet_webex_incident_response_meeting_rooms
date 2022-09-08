@@ -2,15 +2,17 @@ from flask import Flask, request, redirect, session, url_for, render_template, m
 from flask_sqlalchemy import SQLAlchemy
 
 from server import db
+
+# will not create tables if already there
 db.create_all()
 
 from server import Responders,Spaces
 
 
-the_responder1 = Responders(name='Milena Chaves', email='mchaves@cisco.com', mobilenumber='+50666799470')
-the_responder2 = Responders(name='Gerardo Chaves', email='gchaves@cisco.com', mobilenumber='+50688799470')
-the_responder3 = Responders(name='Erica Chaves', email='echaves@cisco.com', mobilenumber='+50622799470')
-the_responder4 = Responders(name='Emma Chaves', email='emchaves@cisco.com', mobilenumber='+50688799411')
+the_responder1 = Responders(name='Peter Parker', email='pparker@acme.com', mobilenumber='+18185552563')
+the_responder2 = Responders(name='John Stamos', email='jstamos@acme.com', mobilenumber='+18185552263')
+the_responder3 = Responders(name='Erica Stone', email='estone@acme.com', mobilenumber='+18185552543')
+the_responder4 = Responders(name='Emma Johansen', email='ejohansen@acme.com', mobilenumber='+18185559213')
 
 the_space1 = Spaces(incidentname='FirstResponseSpace', wbxspaceID='afadsfwerw234234wersfasxxzcsd')
 the_space2 = Spaces(incidentname='SecondResponseSpace', wbxspaceID='afadsfwerw234234wersfasxxzcsd')

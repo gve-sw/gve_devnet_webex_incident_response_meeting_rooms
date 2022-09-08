@@ -36,7 +36,8 @@ applications so that it can access and edit the various spaces for which the use
 
 Follow the instructions in the [Webex Integrations](https://developer.webex.com/docs/integrations) documentation to create
 an integration with the following scopes: spark:all, meetings:recordings_read, meetings:recordings_write, meetings:controls_read,
-meetings:controls_write, meetings:participants_read, meetings:participants_write   
+meetings:controls_write, meetings:participants_read, meetings:participants_write, spark-admin:people_read, 
+spark-admin:telephony_config_read, spark-admin:organizations_read , spark-admin:roles_read
 
 You might want to use the following for the redirect URI in the integration to match de defaults in the sample code:  
 http://0.0.0.0:5500/callback  
@@ -69,9 +70,15 @@ Specify the originating Webex Connect phone number for sending SMS here
 **VOICE_ORIGIN**
 Specify the originating Webex Connect phone number for making notification voice calls here
 
-**TEAM_NAME** 
-Specify name of Webex Team from which to obtain members to offer as available responders 
+**INT_PHONE_TYPE_SMS**  
+Specify type of phone number from the directory (if any) of internal responders to use for sending SMS messages. Current   
+options as per the Webex REST API /people/get-person-details endpoint (https://developer.webex.com/docs/api/v1/people/get-person-details) 
+are: 'mobile', 'work' or 'fax' . Only the first number of that type pulled from the directory will be used. 
 
+**INT_PHONE_TYPE_VOICE**  
+Specify type of phone number from the directory (if any) of internal responders to use for sending voice call notifications. Current   
+options as per the Webex REST API /people/get-person-details endpoint (https://developer.webex.com/docs/api/v1/people/get-person-details) 
+are: 'mobile', 'work' or 'fax' . Only the first number of that type pulled from the directory will be used. 
 
 Also, in the server.py file, configure the following variable:
 
@@ -84,16 +91,9 @@ NOTE: This URL does not actually have to map to a public IP address out on the i
 ### Webex Spaces and team setup  
   
 To use this sample, all users that want to be able to manage incident response conferences must be moderators of the Webex Spaces (rooms) that will 
-be used to host the online meetings and contain users. You can select existing spaces with members alredy in the space, the sample code will 
+be used to host the online meetings and contain users. You can select existing spaces with members already in the space, the sample code will 
 consolidate those users with it's own database so that when you edit it within the web interface consistency is maintained.  
 
-You also need to create a Webex Team where you are a moderator and you add as members all Webex Users inside or outside of your organization 
-that you wish to be able to add to the incident response spaces. Use the name of this team as the alue for the **TEAM_NAME** variable described 
-above.  
-Do not add the Spaces themselves to the Team, just the potential members. 
-You can add all members of your organization if you wish. The intention of this Team is to allow the user of the sample code the ability to  
-list all potential responders without having the privileges to list all users in the organization. It also allows you to add  Webex users 
-that are not part of your organization but that you frequently add as responders. 
 
 ### Internal database  
 This sample manages it's data using SQLLite for which it creates a file named 'incident_esp_db.sqlite3' in the same directory where 
@@ -109,10 +109,21 @@ data will be lost if you delete the DN file.
 
     $ python server.py
 
-Once the flask app is running, use a browser to go to the value you used for PUBLIC_URL (typically http://0.0.0.0:5500) which will re-direct to a Webex Teams 
-authentication page if the first time using it so you can log in using your Webex Teams account credentials. 
+Once the flask app is running,  a user with the role of Webex Admin for the organization has to use a web browser to 
+log into the /admin_login route (typically http://0.0.0.0:5500/admin_login) so that the code can generate a tokens.json file that 
+is stored in the same local directory where the flask application is running so that the entire list of corporate users can be listed 
+in the applications "internal responders" list.  
+If you attempt to use the application without this step, you will be redirected to a page that prompts you to do so and provides the correct URL. 
+Once this requirement is satisfied, you will be re-directed to a page that prompts you  
+to have a regular user that is a moderator of spaces log into the regular initial route (typically http://0.0.0.0:5500)
 
-Once authenticated, you will be presented with a list of spaces for which you are a moderator:
+NOTE: You only have to use the organization admin credentials to log into /admin_login once to generate the tokens.json file. As long 
+as the application is used at least once in a 3 month period, the code will refresh the token as needed. If the file is deleted or 
+it expires beyond refresh , the application with just prompt you to have the admin log in.
+Be sure to clear out the **tokens.json** file when you are done using the sample so you do not leave unsecured token credentials in some 
+test server. When creating production code using this sample as a reference, be sure to store in a more secure manner and fully encrypted. 
+
+Once a moderator is authenticated, you will be presented with a list of spaces for which you are a moderator:
 
 ![IMAGES/SelectSpace.png](IMAGES/SelectSpace.png)  
 
@@ -124,15 +135,23 @@ You will now be presented with the main Incident Response Conference page where 
 
 ![IMAGES/IncidentConfSpace.png](IMAGES/IncidentConfSpace.png)  
 
-- Add Webex User incident responders from the list of members of the team matching the name specified in the **TEAM_NAME** environmental variable
+- Add Webex User incident responders from the list of all members of the organization. You can filter the list by entering at least the 
+first 3 characters of the Full Name of the person you are looking for in the search bar and pressing Enter. 
+Press Enter on an empty search field to return to the full directory. 
 - Add external incident responders from a list that you can add members to. These are not Webex Users but need to have a least a name and either a mobile number 
 or a voice number. 
 - Remove incident responders from the space
+- Toggle notification mechanism for each responder in the space by hovering over the row with their name. You can click on the SMS or Phone icon 
+to toggle using that as a mechanism no notifying the (Phone icon means it will place a voice call to remind them)
 - Start an incident response conference. This opens a new tab in the browser you are using and redirects you to a page that 
 lets you start the meeting using an installed Webex App.  It also triggers a back end process in the sample code that will send the
  join information to all members of the incident response space via Webex Message and all of those external responders that are not 
 Webex Users will recive an SMS message sent to their mobile number and, if a voice only number is configured, they will receive a call 
 that will spell out the meeting number and phone number to call using text to speech.  
+- Send a reminder notification to individual responders in the space by overing the mouse cursor above the row for the responder in the list 
+and clicking on the blue paper airplane icon to re-send an invitation. Don't forget to toggle SMS or Phone icons as needed if you want to modify 
+how they are being notified. By default, if the responder is internal or external with an email address, the application will also send them a 
+Webex message. 
 - Stop an incident response conference by removing all members of the space which kicks them off of the response conference. It also clears 
 the name of the incident
 - You can return to the list of spaces for which you are a moderator by clicking on the "Done" button.  

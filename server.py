@@ -49,10 +49,11 @@ load_dotenv()
 AUTHORIZATION_BASE_URL = 'https://api.ciscospark.com/v1/authorize'
 TOKEN_URL = 'https://api.ciscospark.com/v1/access_token'
 SCOPE = 'spark:all'
+ADMIN_SCOPE = ['spark-admin:people_read', 'spark-admin:telephony_config_read', 'spark-admin:organizations_read' , 'spark-admin:roles_read']
 
+DISABLE_SSL_VERIFY=False
 
-
-#initialize variabes for URLs
+#initialize variables for URLs
 #REDIRECT_URL must match what is in the integration, but we will construct it below in __main__
 # so no need to hard code it here
 PUBLIC_URL='http://0.0.0.0:5500'
@@ -82,6 +83,8 @@ class Responders(db.Model):
     email = db.Column(db.String(255))
     mobilenumber = db.Column(db.String(255))
     voicenumber = db.Column(db.String(255))
+    sendSMS = db.Column(db.Boolean)
+    sendVoice = db.Column(db.Boolean)
 
 
 class Spaces(db.Model):
@@ -121,6 +124,64 @@ def login():
     print("root route is re-directing to ",authorization_url," and had sent redirect uri: ",REDIRECT_URI)
     return redirect(authorization_url)
 
+def check_token_refresh(tokens):
+    print("Existing token on file, checking if expired....")
+    access_token_expires_at = tokens['expires_at']
+    if time.time() > access_token_expires_at:
+        print("expired!")
+        refresh_token = tokens['refresh_token']
+        # make the calls to get new token
+        extra = {
+            'client_id': os.getenv('CLIENT_ID'),
+            'client_secret': os.getenv('CLIENT_SECRET'),
+            'refresh_token': refresh_token,
+        }
+        auth_code = OAuth2Session(os.getenv('CLIENT_ID'), token=tokens)
+        new_teams_token = auth_code.refresh_token(TOKEN_URL, **extra)
+        print("Obtained new_teams_token: ", new_teams_token)
+        # assign new token
+        tokens = new_teams_token
+        # store away the new token
+        with open('tokens.json', 'w') as json_file:
+            json.dump(tokens, json_file)
+    return tokens
+
+@app.route("/admin_login")
+def admin_login():
+    """Step 1: User Authorization.
+    Redirect the user/resource owner to the OAuth provider (i.e. Webex Teams)
+    using a URL with a few key OAuth parameters.
+    """
+    global REDIRECT_URI
+    global PUBLIC_URL
+
+    if os.path.exists('tokens.json'):
+        with open('tokens.json') as f:
+            tokens = json.load(f)
+    else:
+        tokens = None
+
+    if tokens == None or time.time()>(tokens['expires_at']+(tokens['refresh_token_expires_in']-tokens['expires_in'])):
+        # We could not read the token from file or it is so old that even the refresh token is invalid, so we have to
+        # trigger a full oAuth flow with user intervention
+        REDIRECT_URI = PUBLIC_URL + '/callback'  # Copy your active  URI + /callback
+        print("Using PUBLIC_URL: ",PUBLIC_URL)
+        print("Using redirect URI: ",REDIRECT_URI)
+        teams = OAuth2Session(os.getenv('CLIENT_ID'), scope=ADMIN_SCOPE, redirect_uri=REDIRECT_URI)
+        authorization_url, state = teams.authorization_url(AUTHORIZATION_BASE_URL)
+
+        # State is used to prevent CSRF, keep this for later.
+        print("Storing state: ",state)
+        session['oauth_state'] = state
+        print("root route is re-directing to ",authorization_url," and had sent redirect uri: ",REDIRECT_URI)
+        return redirect(authorization_url)
+    else:
+        # We read a token from file that is at least younger than the expiration of the refresh token, so let's
+        # check and see if it is still current or needs refreshing without user intervention
+        validated_tokens=check_token_refresh(tokens)
+        session['oauth_token'] = validated_tokens
+        print("Using stored or refreshed token....")
+        return redirect(url_for('.started'))
 
 # Step 2: User authorization, this happens on the provider.
 
@@ -156,11 +217,42 @@ def started():
     global api
 
     teams_token = session['oauth_token']
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     # first retrieve information about who is logged in
     theResult=api.people.me()
     #print("TheResult calling api.people.me(): ",theResult)
+
+
+    #TODO: Test actually going to /admin_login!!! if it still does not work,
+    # Need to try a call that would only work for an admin and handle error
+    if theResult.roles:
+        # it was an admin who logged in, so let's capture that token into a file for
+        # use by moderators to be able to read the entire directory since they cannot with
+        # their own credentials
+        with open('tokens.json', 'w') as json_file:
+            json.dump( session['oauth_token'], json_file)
+        return render_template("admin_login_success.html", moderatorURL=PUBLIC_URL)
+
+    if os.path.exists('tokens.json'):
+        with open('tokens.json') as f:
+            admin_tokens = json.load(f)
+    else:
+        admin_tokens = None
+
+    if admin_tokens == None or time.time()>(admin_tokens['expires_at']+(admin_tokens['refresh_token_expires_in']-admin_tokens['expires_in'])):
+        # We could not read the token from file or it is so old that even the refresh token is invalid, so we have to
+        # trigger a full oAuth flow with user intervention
+        print("Need to have admin login go generate admin token....")
+        return render_template("need_admin_login.html", adminURL=PUBLIC_URL+'/admin_login')
+    else:
+        # We read a token from file that is at least younger than the expiration of the refresh token, so let's
+        # check and see if it is still current or needs refreshing without user intervention
+        validated_admin_tokens=check_token_refresh(admin_tokens)
+        print("Admin token to use now stored in validated_admin_tokens")
+
+    #store away the admin token in the session to use later
+    session['adminToken'] = validated_admin_tokens
 
     #store the Webex Person ID of the owner of this session, which should be a moderator in the space
     modID=theResult.id
@@ -175,13 +267,8 @@ def started():
             roomId=membership.roomId
             theRoom=api.rooms.get(roomId)
             theRoomTitle=theRoom.title
-            # only list spaces that are not the main team we are using to track all users that
-            # we want to list for easy adding
-            if theRoomTitle!=os.getenv('TEAM_NAME'):
-                moderatedRooms.append({'id':roomId,'title':theRoomTitle})
-            else:
-                teamID=roomId
-                session['teamID']=teamID
+            moderatedRooms.append({'id':roomId,'title':theRoomTitle})
+
     #print(moderatedRooms)
     return render_template("select_space.html", moderatorName=theResult.displayName , moderatedRooms=moderatedRooms)
 
@@ -200,11 +287,11 @@ def space_selected(operation=None):
     teams_token = session['oauth_token']
 
     #retieve teamID we are working with
-    teamID=session['teamID']
+    #teamID=session['teamID']
 
     #store away the roomID we are working on at the moment
     session['roomID'] = roomID
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     theRoom=api.rooms.get(roomID)
     space_name=theRoom.title
@@ -249,12 +336,23 @@ def space_selected(operation=None):
                 the_person = api.people.get(theMember.personId)
                 # pull mobile phone info from the person object to add to DB if available
                 the_person_mobile = None
+                the_person_voice = None
+                sms_type = os.getenv('INT_PHONE_TYPE_SMS')
+                voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
                 if the_person.phoneNumbers():
                     for aNumber in the_person.phoneNumbers():
-                        if aNumber['type'] == "mobile":
+                        if aNumber['type'] == sms_type:  # i.e. "mobile":
                             the_person_mobile = aNumber['value']
+                        if aNumber['type'] == voice_type:  # i.e. "work":
+                            the_person_voice = aNumber['value']
 
-                another_responder = Responders(wbxpersonID=theMember.personId,name=theMember.personDisplayName, email=theMember.personEmail,mobilenumber=the_person_mobile)
+                another_responder = Responders(wbxpersonID=theMember.personId,
+                                               name=theMember.personDisplayName,
+                                               email=theMember.personEmail,
+                                               mobilenumber=the_person_mobile,
+                                               voicenumber=the_person_voice,
+                                               sendSMS=False,
+                                               sendVoice=False)
                 db.session.add(another_responder)
             # add it to the_space (either newly created or if found)
             the_space.responders.append(another_responder)
@@ -288,7 +386,9 @@ def space_selected(operation=None):
                         'memberDisplayName':a_responder.name,
                         'memberMobile': a_responder.mobilenumber if a_responder.mobilenumber!=None else "",
                         'memberVoice': a_responder.voicenumber if a_responder.voicenumber!=None else "",
-                        'personInitials': ''.join(i[0] for i in a_responder.name.split()).upper()
+                        'personInitials': ''.join(i[0] for i in a_responder.name.split()).upper(),
+                        'sendSMS' : a_responder.sendSMS,
+                        'sendVoice' : a_responder.sendVoice
                         })
 
     #initialize list to send to page with externals
@@ -304,16 +404,37 @@ def space_selected(operation=None):
                         })
 
 
-    #Fill available responders to select from using members of the pre-defined Team in teamID
-    # which should be the one with title=TEAM_NAME
-    #TODO: Change this to include also all responders in 'responders' table *plus* those in the Team
-    teamMemberships=api.memberships.list(roomId=teamID)
+    #Fill available responders to select from or directory
+    admin_teams_token=session['adminToken']
+    adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+
+    # only trigger partial search if a search term was passed in variable operation and is at least
+    # three characters long since the people.list() method requires it
+    if (operation!=None and operation[:7]=='search:' and len(operation)>10 ):
+        fullDirectory=adminApi.people.list(displayName=operation.split('search:',1)[1])
+    else:
+        fullDirectory=adminApi.people.list()
+
     team=[]
-    for entry in teamMemberships:
-        team.append({'personId':entry.personId,
-                        'personEmail':entry.personEmail,
-                        'personDisplayName':entry.personDisplayName,
-                        'personInitials': ''.join(i[0] for i in entry.personDisplayName.split()).upper()
+    for entry in fullDirectory:
+        entryPhoneMobile=''
+        entryPhoneVoice = ''
+        sms_type = os.getenv('INT_PHONE_TYPE_SMS')
+        voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
+        if entry.phoneNumbers():
+            for aNumber in entry.phoneNumbers():
+                print(f"Numbers found for {entry.displayName}: {aNumber['type']} {aNumber['value']} ")
+                if aNumber['type'] == sms_type:
+                    entryPhoneMobile = aNumber['value']
+                if aNumber['type'] == voice_type:
+                    entryPhoneVoice = aNumber['value']
+
+        team.append({'personId':entry.id,
+                        'personEmail':entry.emails[0],
+                        'personDisplayName':entry.displayName,
+                        'personInitials': ''.join(i[0] for i in entry.displayName.split()).upper(),
+                        'personPhoneMobile': entryPhoneMobile,
+                        'personPhoneVoice': entryPhoneVoice
                         })
 
     return render_template("index.html",team=team, space_name=space_name, inc_name=the_space.incidentname, members=members, externals=externals, smsorigin=os.getenv('SMS_ORIGIN'))
@@ -333,7 +454,7 @@ def start_conference():
     modID=session['modID']
 
 
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     # obtain incident name from arguments
     formIncidentName = request.args.get('inc_name', '')
@@ -352,8 +473,11 @@ def start_conference():
     #obtain the meeting information for the room.
     rmMtgInfo=api.rooms.get_meeting_info(roomID)
 
+    theWebexSpace=api.rooms.get(roomID)
+
+
     #assemble message
-    msgSnd=f'Join incident “{theIncidentName}” being handled in response room ResponseConf1.\
+    msgSnd=f'Join incident “{theIncidentName}” being handled in response room {theWebexSpace.title}.\
     Options (just use one):\n\
     Via Webex App: {rmMtgInfo.meetingLink}\n\
     Dial into the meeting: {rmMtgInfo.callInTollNumber}pp{rmMtgInfo.meetingNumber}# (press # again when prompted)'
@@ -374,7 +498,7 @@ def start_conference():
         #Only send out IMI or voice calls if IMI Service is configured
         if os.getenv('IMI_SERVICE_KEY')!="":
             #send message via SMS to mobile number (if available)
-            if responder.mobilenumber!=None and responder.mobilenumber!="":
+            if responder.sendSMS and responder.mobilenumber!=None and responder.mobilenumber!="":
                 print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
                 url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
                 payload = json.dumps({
@@ -387,12 +511,12 @@ def start_conference():
                     'Authorization': os.getenv('IMI_SERVICE_KEY'),
                     'Content-Type': 'application/json'
                 }
-                response = requests.request("POST", url, headers=headers, data=payload)
+                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
                 print("Sent SMS: ",response.text)
                 time.sleep(2)
 
             # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
-            if responder.voicenumber!=None and responder.voicenumber!="":
+            if responder.sendVoice and responder.voicenumber!=None and responder.voicenumber!="":
                 print(f'Making voice call to {responder.name}')
                 url = "https://api-sandbox.imiconnect.io/v1/voice/messages"
                 payload = json.dumps({
@@ -412,7 +536,7 @@ def start_conference():
                     'Authorization': os.getenv('IMI_SERVICE_KEY'),
                     'Content-Type': 'application/json'
                 }
-                response = requests.request("POST", url, headers=headers, data=payload)
+                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
                 print("Made voice call: ",response.text)
                 time.sleep(2)
     # redirect to link to launch the meeting
@@ -428,7 +552,7 @@ def end_conference():
     # retrieve roomID we are working with
     roomID = session['roomID']
 
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
 
     the_space = Spaces.query.filter_by(wbxspaceID=roomID).first()
@@ -503,7 +627,7 @@ def DelMember():
     roomID = session['roomID']
     #retrieve the Webex Person ID of the owner of this session, which should be a moderator in the space
     modID=session['modID']
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     member_id = request.args.get('mem_id', '')
     print('Member ID to delete: ',member_id)
@@ -546,7 +670,7 @@ def AddMember():
     teams_token = session['oauth_token']
     roomID = session['roomID']
 
-    api = WebexTeamsAPI(access_token=teams_token['access_token'])
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     member_id = request.args.get('mem_id', '')
 
@@ -575,11 +699,22 @@ def AddMember():
             #pull mobile phone info from the person object to add to DB if available
             # and if user is in the same org of that person and has right to see phone numbers
             the_person_mobile=None
+            the_person_voice=None
+            sms_type=os.getenv('INT_PHONE_TYPE_SMS')
+            voice_type=os.getenv('INT_PHONE_TYPE_VOICE')
             if the_person.phoneNumbers():
                 for aNumber in the_person.phoneNumbers():
-                    if aNumber['type']=="mobile":
-                        the_person_mobile=aNumber['value']
-            the_responder = Responders(name=the_person.displayName, wbxpersonID=member_id,email=the_person.emails[0],mobilenumber=the_person_mobile)
+                    if aNumber['type'] == sms_type:  # i.e. "mobile":
+                        the_person_mobile = aNumber['value']
+                    if aNumber['type'] == voice_type:  # i.e. "work":
+                        the_person_voice = aNumber['value']
+            the_responder = Responders( name=the_person.displayName,
+                                        wbxpersonID=member_id,
+                                        email=the_person.emails[0],
+                                        mobilenumber=the_person_mobile,
+                                        voicenumber=the_person_voice,
+                                        sendSMS=False,
+                                        sendVoice=False)
             db.session.add(the_responder)
             print(f'Had to create responder {the_person.displayName} in responders table in DB...')
 
@@ -611,7 +746,12 @@ def AddNewExternal():
     print(f'New External to create: {ext_name},{ext_mobile},{ext_email},{ext_voice}')
 
     if (ext_name!=None and (ext_mobile!=None or ext_voice!=None)):
-        the_responder = Responders(name=ext_name, mobilenumber=ext_mobile, email=ext_email, voicenumber=ext_voice)
+        the_responder = Responders( name=ext_name,
+                                    mobilenumber=ext_mobile,
+                                    email=ext_email,
+                                    voicenumber=ext_voice,
+                                    sendSMS=True if ext_mobile!=None else False ,
+                                    sendVoice=True if ext_voice!=None else False)
         db.session.add(the_responder)
         print(f'Created external responder {ext_name} in responders table in DB...')
         db.session.commit()
@@ -619,6 +759,14 @@ def AddNewExternal():
         print("Not created: new external entry must have at least name and mobile or voice number.")
     return space_selected(operation='AddNewExternal')
 
+
+@app.route('/UpdateInternalsList')
+def UpdateInternalsList():
+    print('In UpdateInternalsList')
+    # Here we just re-draw screen but specify a subset of users to retrieve from
+    # global directory
+    search_str = request.args.get('search_str', '')
+    return space_selected(operation='search:'+search_str)
 
 @app.route('/UpdateIncName')
 def UpdateIncName():
@@ -639,7 +787,160 @@ def UpdateIncName():
     alert_data = {'update_inc_name_result':'updated'}
     return jsonify(result=alert_data)
 
+@app.route('/toggleSendSMS')
+def toggleSendSMS():
+    print('In toggleSendSMS')
+    toggleResult="Unchanged"
 
+    member_id = request.args.get('mem_id', '')
+    print('Member ID to toggle sendSMS flag: ',member_id)
+
+    #Toggle the sendSMS flag
+    the_responder_SMS_toggle= Responders.query.filter_by(responders_id=member_id).first()
+    if the_responder_SMS_toggle.mobilenumber!=None and the_responder_SMS_toggle.mobilenumber!="":
+        the_responder_SMS_toggle.sendSMS= not the_responder_SMS_toggle.sendSMS
+        toggleResult='Enabled' if the_responder_SMS_toggle.sendSMS else 'Disabled'
+        print(f'Toggled sendSMS for member {member_id}')
+        db.session.commit()
+
+    alert_data = {'toggle_result':toggleResult}
+    return jsonify(result=alert_data)
+
+@app.route('/toggleSendVoice')
+def toggleSendVoice():
+    print('In toggleSendVoice')
+    toggleResult="Unchanged"
+
+    member_id = request.args.get('mem_id', '')
+    print('Member ID to toggle sendVoice flag: ',member_id)
+
+    #Toggle the sendVoice flag
+    the_responder_Voice_toggle= Responders.query.filter_by(responders_id=member_id).first()
+    if the_responder_Voice_toggle.voicenumber!=None and the_responder_Voice_toggle.voicenumber!="":
+        the_responder_Voice_toggle.sendVoice= not the_responder_Voice_toggle.sendVoice
+        toggleResult='Enabled' if the_responder_Voice_toggle.sendVoice else 'Disabled'
+        print(f'Toggled sendSMS for member {member_id}')
+        db.session.commit()
+
+    alert_data = {'toggle_result':toggleResult}
+    return jsonify(result=alert_data)
+
+@app.route('/sendOneInvite')
+def sendOneInvite():
+    print('In sendOneInvite')
+    sendResult="NoneSent"
+
+    global api
+
+    # retrieve token from session
+    teams_token = session['oauth_token']
+
+    # retrieve roomID we are working with
+    roomID = session['roomID']
+
+    #retrieve the Webex Person ID of the owner of this session, which should be a moderator in the space
+    modID=session['modID']
+
+
+    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+
+    # obtain incident name from arguments
+    formIncidentName = request.args.get('inc_name', '')
+
+    print("Incident name from form: ",formIncidentName)
+
+    the_space = Spaces.query.filter_by(wbxspaceID=roomID).first()
+
+    if the_space != None:
+        if formIncidentName!=the_space.incidentname:
+            the_space.incidentname=formIncidentName
+            db.session.commit()
+
+    theIncidentName=the_space.incidentname
+
+    theWebexSpace=api.rooms.get(roomID)
+
+    #obtain the meeting information for the room.
+    rmMtgInfo=api.rooms.get_meeting_info(roomID)
+
+    #assemble message
+    msgSnd=f'Join incident “{theIncidentName}” being handled in response room {theWebexSpace.title}.\
+    Options (just use one):\n\
+    Via Webex App: {rmMtgInfo.meetingLink}\n\
+    Dial into the meeting: {rmMtgInfo.callInTollNumber}pp{rmMtgInfo.meetingNumber}# (press # again when prompted)'
+
+
+
+    member_id = request.args.get('mem_id', '')
+    print('Member ID to send one invite: ',member_id)
+
+    #Send out one invite
+    responder= Responders.query.filter_by(responders_id=member_id).first()
+
+    # send message via Webex Messaging to email address (if available)
+    if responder.email != None and responder.email != "":
+        # need to skip the user of this application since it is not allowed
+        # to send messages to oneself
+        if responder.wbxpersonID != modID and responder.wbxpersonID != None:
+            print(f'Sending Webex message to {responder.name}')
+            api.messages.create(toPersonId=responder.wbxpersonID, text=msgSnd)
+            print("Sent Webex message to: ", responder.email)
+            sendResult += "WbxMsgSent"
+
+    if os.getenv('IMI_SERVICE_KEY') != "":
+
+        if responder.sendSMS:
+        # Only send out IMI or voice calls if IMI Service is configured
+            # send message via SMS to mobile number (if available)
+            if responder.mobilenumber != None and responder.mobilenumber != "":
+                print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
+                url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
+                payload = json.dumps({
+                    "from": os.getenv('SMS_ORIGIN'),
+                    "to": responder.mobilenumber,
+                    "content": msgSnd,
+                    "contentType": "TEXT"
+                })
+                headers = {
+                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
+                    'Content-Type': 'application/json'
+                }
+                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
+                #TODO: Check response to see if really sent it
+                print("Sent SMS: ", response.text)
+                time.sleep(2)
+                sendResult+="SMSSent"
+
+        if responder.sendVoice:
+            print("Making voice call....")
+            # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
+            if responder.voicenumber!=None and responder.voicenumber!="":
+                print(f'Making voice call to {responder.name}')
+                url = "https://api-sandbox.imiconnect.io/v1/voice/messages"
+                payload = json.dumps({
+                    "callerId": os.getenv('VOICE_ORIGIN'),
+                    "dialedNumber": responder.voicenumber,
+                    "audio": {
+                        "type": "TTS",
+                        "text": f'Hello, this is the incident responder. Please join meeting {rmMtgInfo.meetingNumber} by calling {rmMtgInfo.callInTollNumber}',
+                        "textFormat": "TEXT",
+                        "voice": "AriaNeural",
+                        "engine": "AZURE",
+                        "language": "en-US",
+                        "gender": "female"
+                    }
+                })
+                headers = {
+                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
+                    'Content-Type': 'application/json'
+                }
+                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
+                #TODO: check response to see if really made call to modify sendResult accordingly
+                print("Made voice call: ",response.text)
+                sendResult += "VoiceSent"
+
+    alert_data = {'send_invite_result':sendResult}
+    return jsonify(result=alert_data)
 
 # Start the Flask web server
 if __name__ == '__main__':
