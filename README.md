@@ -13,7 +13,7 @@ and "phone only" members that are invited to join via SMS or voice call using We
 
 ## Coding Guides used
  
-Downgrading the requests-oauthlib library to version 0.0.0 to avoid the OAuth error I was getting:
+Downgrading the requests-oauthlib library to version 1.0.0 to avoid the OAuth error I was getting:
 https://github.com/requests/requests-oauthlib/issues/324
 
 Example Oauth with Webex Teams:
@@ -140,6 +140,7 @@ first 3 characters of the Full Name of the person you are looking for in the sea
 Press Enter on an empty search field to return to the full directory. 
 - Add external incident responders from a list that you can add members to. These are not Webex Users but need to have a least a name and either a mobile number 
 or a voice number. 
+- Edit external incident responders in the list. Any changes will affect those already added to the responders in the space. 
 - Remove incident responders from the space
 - Toggle notification mechanism for each responder in the space by hovering over the row with their name. You can click on the SMS or Phone icon 
 to toggle using that as a mechanism no notifying the (Phone icon means it will place a voice call to remind them)

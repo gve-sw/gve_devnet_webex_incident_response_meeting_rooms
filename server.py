@@ -37,6 +37,7 @@ import requests
 import os
 import time
 import json
+from string import Template
 import jinja2
 
 from webexteamssdk import WebexTeamsAPI, Webhook, AccessToken
@@ -44,7 +45,18 @@ from webexteamssdk import WebexTeamsAPI, Webhook, AccessToken
 # load all environment variables
 load_dotenv()
 
+# You can edit the content of the text message to be sent via SMS and Webex Messaging by modifying the template
+# string below. The template variables you want to keep intact as you move around or remove completely are:
+# $incName , $spaceTitle, $mtgLink, $mtgTollNumber, $mtgNumber
+text_msg_template = 'Join incident "${incName}" being handled in response room ${spaceTitle}.\n\
+Options (just use one):\n\
+Via Webex App: ${mtgLink}\n\
+Dial into the meeting: ${mtgTollNumber}pp${mtgNumber}# (press # again when prompted)'
 
+# You can edit the content of the voice message to deliver via phone call (text to speech) by modifying the template
+# string below. These are the template variables you want to keep intact as you move around or remove completely:
+# $incName , $mtgTollNumber, $mtgNumber
+voice_msg_template = 'Hello, incident titled ${incName} requires your participation. Please join meeting ${mtgNumber} by calling ${mtgTollNumber}. Hello, incident titled ${incName} requires your participation. Please join meeting ${mtgNumber} by calling ${mtgTollNumber}'
 
 AUTHORIZATION_BASE_URL = 'https://api.ciscospark.com/v1/authorize'
 TOKEN_URL = 'https://api.ciscospark.com/v1/access_token'
@@ -440,6 +452,70 @@ def space_selected(operation=None):
     return render_template("index.html",team=team, space_name=space_name, inc_name=the_space.incidentname, members=members, externals=externals, smsorigin=os.getenv('SMS_ORIGIN'))
 
 
+def send_wbx_msg(wbxpersonID, meetingNumber, callInTollNumber, meetingLink, theIncidentName, theWebexSpaceTitle):
+    global api
+    text_msg_text = Template(text_msg_template).substitute(mtgNumber=meetingNumber,
+                                                           mtgTollNumber=callInTollNumber,
+                                                           mtgLink=meetingLink,
+                                                           incName=theIncidentName,
+                                                           spaceTitle=theWebexSpaceTitle)
+    print("Sending text message via Webex messaging...")
+    api.messages.create(toPersonId=wbxpersonID, text=text_msg_text)
+
+def send_SMS_msg(mobileNumber, meetingNumber, callInTollNumber, meetingLink, theIncidentName, theWebexSpaceTitle):
+    text_msg_text = Template(text_msg_template).substitute(mtgNumber=meetingNumber,
+                                                           mtgTollNumber=callInTollNumber,
+                                                           mtgLink=meetingLink,
+                                                           incName=theIncidentName,
+                                                           spaceTitle=theWebexSpaceTitle)
+    print("Sending SMS message...")
+    # Only send out IMI or voice calls if IMI Service is configured
+    if os.getenv('IMI_SERVICE_KEY') != "":
+        # send message via SMS to mobile number
+        url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
+        payload = json.dumps({
+            "from": os.getenv('SMS_ORIGIN'),
+            "to": mobileNumber,
+            "content": text_msg_text,
+            "contentType": "TEXT"
+        })
+        headers = {
+            'Authorization': os.getenv('IMI_SERVICE_KEY'),
+            'Content-Type': 'application/json'
+        }
+        response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
+        print("Send SMS response: ", response.text)
+
+def send_Voice_msg(voiceNumber, meetingNumber, callInTollNumber, theIncidentName):
+    voice_msg_text = Template(voice_msg_template).substitute(mtgNumber=meetingNumber,
+                                                             mtgTollNumber=callInTollNumber,
+                                                             incName=theIncidentName)
+    print('Sending voice message via outbound call.... ')
+    if os.getenv('IMI_SERVICE_KEY') != "":
+        # call out to voice number and play message telling to check SMS or Webex messaging for call in info
+        url = "https://api-sandbox.imiconnect.io/v1/voice/messages"
+        payload = json.dumps({
+            "callerId": os.getenv('VOICE_ORIGIN'),
+            "dialedNumber": voiceNumber,
+            "audio": {
+                "type": "TTS",
+                "text": voice_msg_text,
+                "textFormat": "TEXT",
+                "voice": "AriaNeural",
+                "engine": "AZURE",
+                "language": "en-US",
+                "gender": "female"
+            }
+        })
+        headers = {
+            'Authorization': os.getenv('IMI_SERVICE_KEY'),
+            'Content-Type': 'application/json'
+        }
+        response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
+        print("Make voice call response: ", response.text)
+
+
+
 @app.route("/start_conference", methods=['GET', 'POST'])
 def start_conference():
     global api
@@ -452,7 +528,6 @@ def start_conference():
 
     #retrieve the Webex Person ID of the owner of this session, which should be a moderator in the space
     modID=session['modID']
-
 
     api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
@@ -475,15 +550,6 @@ def start_conference():
 
     theWebexSpace=api.rooms.get(roomID)
 
-
-    #assemble message
-    msgSnd=f'Join incident “{theIncidentName}” being handled in response room {theWebexSpace.title}.\
-    Options (just use one):\n\
-    Via Webex App: {rmMtgInfo.meetingLink}\n\
-    Dial into the meeting: {rmMtgInfo.callInTollNumber}pp{rmMtgInfo.meetingNumber}# (press # again when prompted)'
-
-    print(msgSnd)
-
     #loop through all responders in the_space
     for responder in the_space.responders:
         #send message via Webex Messaging to email address (if available)
@@ -492,53 +558,32 @@ def start_conference():
             #to send messages to oneself
             if responder.wbxpersonID!=modID and responder.wbxpersonID!=None:
                 print(f'Sending Webex message to {responder.name}')
-                api.messages.create(toPersonId=responder.wbxpersonID, text=msgSnd)
+                send_wbx_msg(responder.wbxpersonID,
+                             rmMtgInfo.meetingNumber,
+                             rmMtgInfo.callInTollNumber,
+                             rmMtgInfo.meetingLink,
+                             theIncidentName,
+                             theWebexSpace.title)
+
                 print("Sent Webex message to: ",responder.email)
 
-        #Only send out IMI or voice calls if IMI Service is configured
-        if os.getenv('IMI_SERVICE_KEY')!="":
-            #send message via SMS to mobile number (if available)
-            if responder.sendSMS and responder.mobilenumber!=None and responder.mobilenumber!="":
-                print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
-                url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
-                payload = json.dumps({
-                    "from": os.getenv('SMS_ORIGIN'),
-                    "to": responder.mobilenumber,
-                    "content": msgSnd,
-                    "contentType": "TEXT"
-                })
-                headers = {
-                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json'
-                }
-                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
-                print("Sent SMS: ",response.text)
-                time.sleep(2)
+        #send message via SMS to mobile number (if available)
+        if responder.sendSMS and responder.mobilenumber!=None and responder.mobilenumber!="":
+            print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
+            send_SMS_msg(responder.mobilenumber,
+                         rmMtgInfo.meetingNumber,
+                         rmMtgInfo.callInTollNumber,
+                         rmMtgInfo.meetingLink,
+                         theIncidentName,
+                         theWebexSpace.title)
+            time.sleep(2)
 
-            # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
-            if responder.sendVoice and responder.voicenumber!=None and responder.voicenumber!="":
-                print(f'Making voice call to {responder.name}')
-                url = "https://api-sandbox.imiconnect.io/v1/voice/messages"
-                payload = json.dumps({
-                    "callerId": os.getenv('VOICE_ORIGIN'),
-                    "dialedNumber": responder.voicenumber,
-                    "audio": {
-                        "type": "TTS",
-                        "text": f'Hello, this is the incident responder. Please join meeting {rmMtgInfo.meetingNumber} by calling {rmMtgInfo.callInTollNumber}',
-                        "textFormat": "TEXT",
-                        "voice": "AriaNeural",
-                        "engine": "AZURE",
-                        "language": "en-US",
-                        "gender": "female"
-                    }
-                })
-                headers = {
-                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json'
-                }
-                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
-                print("Made voice call: ",response.text)
-                time.sleep(2)
+        #voice_msg_text=Template(voice_msg_template).substitute(mtgNumber=rmMtgInfo.meetingNumber,mtgTollNumber=rmMtgInfo.callInTollNumber, incName=theIncidentName)
+        # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
+        if responder.sendVoice and responder.voicenumber!=None and responder.voicenumber!="":
+            print(f'Making voice call to {responder.name}')
+            send_Voice_msg(responder.voicenumber, rmMtgInfo.meetingNumber, rmMtgInfo.callInTollNumber, theIncidentName)
+            time.sleep(2)
     # redirect to link to launch the meeting
     return redirect(rmMtgInfo.meetingLink)
 
@@ -616,6 +661,44 @@ def AddExternal():
     #return jsonify(result=alert_data)
     return space_selected(operation='AddExternal')
 
+@app.route('/UpdateExternal')
+def UpdateExternal():
+    print('In UpdateExernal')
+    external_id = request.args.get('ext_id', '')
+    print('External ID: ',external_id)
+
+    external_name = request.args.get('ext_name', '')
+    external_mobile = request.args.get('ext_mobile', '')
+    external_email = request.args.get('ext_email', '')
+    external_voice = request.args.get('ext_voice', '')
+
+    if external_name=="":
+        external_name=None
+    if external_mobile=="":
+        external_mobile=None
+    if external_email=="":
+        external_email=None
+    if external_voice=="":
+        external_voice=None
+
+    the_ext_responder = Responders.query.filter_by(responders_id=external_id).first()
+
+    if (external_name != None and (external_mobile != None or external_voice != None)):
+        the_ext_responder.name=external_name
+        the_ext_responder.mobilenumber = external_mobile
+        the_ext_responder.email = external_email
+        the_ext_responder.voicenumber = external_voice
+        the_ext_responder.sendSMS=True if external_mobile!=None else False
+        the_ext_responder.sendVoice = True if external_voice != None else False
+
+        db.session.commit()
+        print(f'Updated External: {external_name},{external_mobile},{external_email},{external_voice}')
+    else:
+        print(f'Could not update external, missing data: {external_name},{external_mobile},{external_email},{external_voice}')
+
+    #alert_data = {'add_result':'added'}
+    #return jsonify(result=alert_data)
+    return space_selected(operation='UpdateExternal')
 
 @app.route('/DelMember')
 def DelMember():
@@ -759,6 +842,26 @@ def AddNewExternal():
         print("Not created: new external entry must have at least name and mobile or voice number.")
     return space_selected(operation='AddNewExternal')
 
+@app.route('/GetExternal')
+def GetExternal():
+    print('In GetExernal')
+    external_id = request.args.get('ext_id', '')
+    print('External ID: ',external_id)
+
+    the_ext_responder = Responders.query.filter_by(responders_id=external_id).first()
+
+    external_name=the_ext_responder.name
+    external_mobile=the_ext_responder.mobilenumber
+    external_email=the_ext_responder.email
+    external_voice=the_ext_responder.voicenumber
+    print(f'Retrieved External: {external_name},{external_mobile},{external_email},{external_voice}')
+
+    return_data = {'external_name':external_name,
+                   'external_mobile':external_mobile,
+                   'external_email':external_email,
+                   'external_voice':external_voice,}
+    return jsonify(result=return_data)
+
 
 @app.route('/UpdateInternalsList')
 def UpdateInternalsList():
@@ -863,14 +966,6 @@ def sendOneInvite():
     #obtain the meeting information for the room.
     rmMtgInfo=api.rooms.get_meeting_info(roomID)
 
-    #assemble message
-    msgSnd=f'Join incident “{theIncidentName}” being handled in response room {theWebexSpace.title}.\
-    Options (just use one):\n\
-    Via Webex App: {rmMtgInfo.meetingLink}\n\
-    Dial into the meeting: {rmMtgInfo.callInTollNumber}pp{rmMtgInfo.meetingNumber}# (press # again when prompted)'
-
-
-
     member_id = request.args.get('mem_id', '')
     print('Member ID to send one invite: ',member_id)
 
@@ -883,61 +978,36 @@ def sendOneInvite():
         # to send messages to oneself
         if responder.wbxpersonID != modID and responder.wbxpersonID != None:
             print(f'Sending Webex message to {responder.name}')
-            api.messages.create(toPersonId=responder.wbxpersonID, text=msgSnd)
+            send_wbx_msg(responder.wbxpersonID,
+                         rmMtgInfo.meetingNumber,
+                         rmMtgInfo.callInTollNumber,
+                         rmMtgInfo.meetingLink,
+                         theIncidentName,
+                         theWebexSpace.title)
             print("Sent Webex message to: ", responder.email)
             sendResult += "WbxMsgSent"
 
-    if os.getenv('IMI_SERVICE_KEY') != "":
 
-        if responder.sendSMS:
-        # Only send out IMI or voice calls if IMI Service is configured
-            # send message via SMS to mobile number (if available)
-            if responder.mobilenumber != None and responder.mobilenumber != "":
-                print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
-                url = "https://api-sandbox.imiconnect.io/v1/sms/messages"
-                payload = json.dumps({
-                    "from": os.getenv('SMS_ORIGIN'),
-                    "to": responder.mobilenumber,
-                    "content": msgSnd,
-                    "contentType": "TEXT"
-                })
-                headers = {
-                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json'
-                }
-                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
-                #TODO: Check response to see if really sent it
-                print("Sent SMS: ", response.text)
-                time.sleep(2)
-                sendResult+="SMSSent"
+    if responder.sendSMS:
+    # Only send out IMI or voice calls if IMI Service is configured
+        # send message via SMS to mobile number (if available)
+        if responder.mobilenumber != None and responder.mobilenumber != "":
+            print(f'Sending SMS to {responder.name} at {responder.mobilenumber}')
+            send_SMS_msg(responder.mobilenumber,
+                         rmMtgInfo.meetingNumber,
+                         rmMtgInfo.callInTollNumber,
+                         rmMtgInfo.meetingLink,
+                         theIncidentName,
+                         theWebexSpace.title)
+            time.sleep(2)
+            sendResult+="SMSSent"
 
-        if responder.sendVoice:
-            print("Making voice call....")
-            # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
-            if responder.voicenumber!=None and responder.voicenumber!="":
-                print(f'Making voice call to {responder.name}')
-                url = "https://api-sandbox.imiconnect.io/v1/voice/messages"
-                payload = json.dumps({
-                    "callerId": os.getenv('VOICE_ORIGIN'),
-                    "dialedNumber": responder.voicenumber,
-                    "audio": {
-                        "type": "TTS",
-                        "text": f'Hello, this is the incident responder. Please join meeting {rmMtgInfo.meetingNumber} by calling {rmMtgInfo.callInTollNumber}',
-                        "textFormat": "TEXT",
-                        "voice": "AriaNeural",
-                        "engine": "AZURE",
-                        "language": "en-US",
-                        "gender": "female"
-                    }
-                })
-                headers = {
-                    'Authorization': os.getenv('IMI_SERVICE_KEY'),
-                    'Content-Type': 'application/json'
-                }
-                response = requests.request("POST", url, headers=headers, data=payload, verify=not DISABLE_SSL_VERIFY)
-                #TODO: check response to see if really made call to modify sendResult accordingly
-                print("Made voice call: ",response.text)
-                sendResult += "VoiceSent"
+    if responder.sendVoice:
+        # call out to voice number and play message telling to check SMS or Webex messaging for call in info (if available)
+        if responder.voicenumber!=None and responder.voicenumber!="":
+            print(f'Making voice call to {responder.name}')
+            send_Voice_msg(responder.voicenumber, rmMtgInfo.meetingNumber, rmMtgInfo.callInTollNumber, theIncidentName)
+            sendResult += "VoiceSent"
 
     alert_data = {'send_invite_result':sendResult}
     return jsonify(result=alert_data)

@@ -24,6 +24,33 @@ function addExternal(externalID)
    return false;
 }
 
+
+function editExternal(externalID)
+{
+   var edit_ext_modal = document.getElementById("editExtModal");
+   console.log("Passing ext ID: ", externalID);
+  $.getJSON('/GetExternal',
+      { ext_id: externalID },
+      function(data) {
+       console.log(data.result.external_name);
+       console.log(data.result.external_mobile);
+       console.log(data.result.external_email);
+       console.log(data.result.external_voice);
+
+       //populate the edit modal
+        document.getElementById('ext-edit-id').value=externalID
+        document.getElementById('ext-edit-name').value=data.result.external_name
+        document.getElementById('ext-edit-mobile').value=data.result.external_mobile
+        document.getElementById('ext-edit-email').value=data.result.external_email
+        document.getElementById('ext-edit-voice').value=data.result.external_voice
+
+       // display the edit modal
+       edit_ext_modal.style.display = "block";
+    });
+   return false;
+}
+
+
 function delMember(memberID)
 {
    console.log("Passing member ID: ", memberID);
@@ -243,6 +270,63 @@ function selectAllMembers(selectAButton)
 </div>
 
 
+    <div id="editExtModal" class="md-modal__backdrop fade in" style="display:none">
+  <div
+    role="dialog"
+    id="react-aria-modal-dialog2"
+    class="md-modal md-modal--small in"
+    aria-labelledby="modal3"
+  >
+    <div class="md-modal__content">
+      <div class="md-modal__flex-container">
+        <div class="md-modal__header">
+          <span class="md-modal__title">Edit External Responder</span>
+
+        </div>
+        <div class="md-modal__body">
+            <form>
+                    <!-- Form Area -->
+        <div class="medium-5 columns ">
+            <div class="md-input-group">
+                <input class="md-input" id="ext-edit-id" name="ext-edit-id" type="hidden"  value="">
+                <label class="md-label" for="ext-edit-name">Name</label>
+                <input class="md-input" id="ext-edit-name" name="ext-edit-name" type="text" value="">
+                <label class="md-label" for="ext-edit-mobile">Mobile number</label>
+                <input class="md-input" id="ext-edit-mobile" name="ext-edit-mobile" type="text" value="">
+                <label class="md-label" for="ext-edit-email">Email</label>
+                <input class="md-input" id="ext-edit-email" name="ext-edit-email" type="text" value="">
+                <label class="md-label" for="ext-edit-voice">Voice number</label>
+                <input class="md-input" id="ext-edit-voice" name="ext-edit-voice" type="text" value="">
+            </div>
+        </div><!-- .medium-6 .columns -->
+        </form>
+        </div>
+        <div class="md-modal__footer">
+          <button
+                  id="cancel_edit_ext"
+                  class="md-button md-button--36 md-button--default"
+                  alt="Close Modal"
+                  type="button"
+                  aria-label="Close Modal"
+          >
+            <span class="md-button__children" style="opacity: 1;">Cancel</span>
+          </button>
+          <button
+                  id="ok_edit_ext"
+            class="md-button md-button--36 md-button--blue"
+            alt="Submit Form"
+            type="button"
+            aria-label="Submit Form"
+          >
+            <span class="md-button__children" style="opacity: 1;">OK</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 
     <!-- header row includes incident name and SMS Origin -->
     <div class="row space_stack_large" style="margin-bottom: 32px;">
@@ -298,19 +382,19 @@ function selectAllMembers(selectAButton)
                                 <!--
                                 <input id="basic-checkbox" name="all-internal_responders[]" type="checkbox" class="md-input md-checkbox__input" value="{{tmember.personId}}">
                                 -->
-                                <div class="md-avatar md-avatar--44" title="{{tmember.personDisplayName}}">
+                                <div class="md-avatar md-avatar--44" title="{{tmember.personDisplayName}} {% if tmember.personPhoneMobile != '' %}M:{{tmember.personPhoneMobile}} {% endif %}{% if tmember.personPhoneVoice != '' %}V:{{tmember.personPhoneVoice}}{% endif %}">
                                     <span class="md-avatar__letter">{{tmember.personInitials}}</span>
                                 </div>
 
                                 <span style="margin-left: 8px">{{tmember.personDisplayName}}</span>
-                                {% if tmember.personPhoneMobile != "" %} <span style="margin-left: 8px"> M:{{tmember.personPhoneMobile}}</span> {% endif %}
-                                {% if tmember.personPhoneVoice != "" %} <span style="margin-left: 8px"> V:{{tmember.personPhoneVoice}}</span> {% endif %}
+
+
 
                             </div>
 
                             <div class="md-button__container--small hidden-add-button">
                                 <button onclick="addMember('{{tmember.personId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                    alt="add user" type="button" aria-label="add user">
+                                    alt="add user" type="button" aria-label="add user" title="Add to team">
                                     <span class="md-button__children">
                                         <i class="icon icon-plus-circle_24"></i>
                                     </span>
@@ -373,19 +457,19 @@ function selectAllMembers(selectAButton)
 
                     <div class="user_container center_flex_item">
                         <div style="flex: 1">
-                            <div class="md-avatar md-avatar--44" title="{{external.extName}}">
+                            <div class="md-avatar md-avatar--44" title="{{external.extName}} {% if external.extMobile != None %} M:{{external.extMobile}} {% endif %} {% if external.extVoice != None %} V:{{external.extVoice}} {% endif %}">
                                 <span class="md-avatar__letter">{{external.personInitials}}</span>
                             </div>
                             <!--
                             <span style="margin-left: 8px">{{external.extName}} {% if external.extMobile != None %} {{external.extMobile}} {% else %} {{external.extVoice}} {% endif %} </span>
                             -->
-                            <span style="margin-left: 8px">{{external.extName}} {% if external.extMobile != None %} M:{{external.extMobile}} {% endif %} {% if external.extVoice != None %} V:{{external.extVoice}} {% endif %} </span>
+                            <span style="margin-left: 8px">{{external.extName}}  </span>
 
                         </div>
 
                         <div class="md-button__container--small hidden-add-button">
                                 <button onclick="addExternal('{{external.extID}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                    alt="add user" type="button" aria-label="add user">
+                                    alt="add user" type="button" aria-label="add user" title="Add to team">
                                     <span class="md-button__children">
                                         <i class="icon icon-plus-circle_24"></i>
                                     </span>
@@ -393,7 +477,7 @@ function selectAllMembers(selectAButton)
                         </div>
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="editExternal('{{external.extID}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                alt="edit user" type="button" aria-label="edit user" style="background-color: white;">
+                                alt="edit user" type="button" aria-label="edit user" title="Edit" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-edit_24" style="color: #121212"></i>
                                 </span>
@@ -434,25 +518,29 @@ function selectAllMembers(selectAButton)
                             <span style="margin-left: 8px">{{member.memberDisplayName}} {% if member.memberMobile != "" %} M:{{member.memberMobile}} {% endif %} {% if member.memberVoice != "" %} V:{{member.memberVoice}} {% endif %} </span>
 
                         </div>
+                        {% if member.memberMobile != "" %}
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="smsToggleActivate('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                alt="activate sms" type="button" aria-label="activate sms" style="background-color: white;">
+                                alt="activate sms" type="button" aria-label="activate sms" title="toggle send SMS: {{member.memberMobile}}" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-sms_16" id="SMSToggle{{member.memberId}}" style="color: {% if member.sendSMS %} #00853C {% else %} #DEDEDE {% endif %}"></i>
                                 </span>
                             </button>
                         </div>
+                        {% endif %}
+                        {% if member.memberVoice != "" %}
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="voiceToggleActivate('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                alt="activate voice" type="button" aria-label="activate voice" style="background-color: white;">
+                                alt="activate voice" type="button" aria-label="activate voice" title="toggle voice notif.: {{member.memberVoice}}" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-audio-call_16" id="VoiceToggle{{member.memberId}}" style="color: {% if member.sendVoice %} #00853C {% else %} #DEDEDE {% endif %}"></i>
                                 </span>
                             </button>
                         </div>
+                        {% endif %}
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="sendOneInvite('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                alt="resend notification" type="button" aria-label="resend notification" style="background-color: white;">
+                                alt="resend notification" type="button" aria-label="resend notification" title="Re-send invite" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-send_24" style="color: #007AA3"></i>
                                 </span>
@@ -460,7 +548,7 @@ function selectAllMembers(selectAButton)
                         </div>
                         <div class="md-button__container--small hidden-add-button">
                             <button onclick="delMember('{{member.memberId}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
-                                alt="add user" type="button" aria-label="add user" style="background-color: white;">
+                                alt="remove user" type="button" aria-label="Remove" title="Remove" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-delete_24" style="color: #f7644a"></i>
                                 </span>
@@ -532,12 +620,61 @@ ok_btn.onclick = function() {
    return false;
 }
 
+    // Get the edit modal
+var edit_modal = document.getElementById("editExtModal");
+
+// Get the <span> element that closes the modal
+//var span = document.getElementsByClassName("close")[0];
+var cancel_edit_btn=document.getElementById('cancel_edit_ext');
+var ok_edit_btn=document.getElementById('ok_edit_ext');
+
+// When the user clicks on Cancel, clear out data and close the modal
+cancel_edit_btn.onclick = function() {
+  edit_modal.style.display = "none";
+    document.getElementById('ext-edit-id').value=""
+    document.getElementById('ext-edit-name').value=""
+    document.getElementById('ext-edit-mobile').value=""
+    document.getElementById('ext-edit-email').value=""
+    document.getElementById('ext-edit-voice').value=""
+}
+
+// When the user clicks on Ok, retrieve data, create external user
+// and close the modal
+ok_edit_btn.onclick = function() {
+
+    the_id=document.getElementById('ext-edit-id').value
+    the_name=document.getElementById('ext-edit-name').value
+    the_mobile=document.getElementById('ext-edit-mobile').value
+    the_email=document.getElementById('ext-edit-email').value
+    the_voice=document.getElementById('ext-edit-voice').value
+    console.log("Editing element id: ",the_id," with: ",the_name,the_mobile,the_email,the_voice);
+     edit_modal.style.display = "none";
+     // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to AddMember
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('UpdateExternal') }}"+"?ext_name="+encodeURIComponent(the_name)
+                                                                    +"&ext_mobile="+encodeURIComponent(the_mobile)
+                                                                    +"&ext_email="+encodeURIComponent(the_email)
+                                                                    +"&ext_voice="+encodeURIComponent(the_voice)
+                                                                    +"&ext_id="+encodeURIComponent(the_id);
+            });
+   return false;
+}
+
 // When the user clicks anywhere outside of the modal, close it
 window.onclick = function(event) {
+  if (event.target == edit_modal) {
+    edit_modal.style.display = "none";
+  }
   if (event.target == modal) {
     modal.style.display = "none";
   }
 }
+
 
 </script>
 {% endblock %}
