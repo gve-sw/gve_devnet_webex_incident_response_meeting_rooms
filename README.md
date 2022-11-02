@@ -76,7 +76,7 @@ options as per the Webex REST API /people/get-person-details endpoint (https://d
 are: 'mobile', 'work' or 'fax' . Only the first number of that type pulled from the directory will be used. 
 
 **INT_PHONE_TYPE_VOICE**  
-Specify type of phone number from the directory (if any) of internal responders to use for sending voice call notifications. Current   
+Specify type of phone number from the directory (if any) of internal responders to use for sending voice call notifications. Current 
 options as per the Webex REST API /people/get-person-details endpoint (https://developer.webex.com/docs/api/v1/people/get-person-details) 
 are: 'mobile', 'work' or 'fax' . Only the first number of that type pulled from the directory will be used. 
 
@@ -88,10 +88,24 @@ of app.run() at the end of the server.py file, this should be the same value of 
 in the sample code.  
 NOTE: This URL does not actually have to map to a public IP address out on the internet. 
 
-### Webex Spaces and team setup  
+
+
+### Webex Spaces setup  
   
-To use this sample, all users that want to be able to manage incident response conferences must be moderators of the Webex Spaces (rooms) that will 
-be used to host the online meetings and contain users. You can select existing spaces with members already in the space, the sample code will 
+To use this sample, all spaces to be used for incident responses should be moderated by the user with Webex Admin role you will use below to log in 
+and generate the needed token file. The title of those space also needs to be set to the value specified in the INCIDENT_SPACE_NAMES_PREFIX constant 
+in your copy of the server.py script. The default value is "Response" but you can change it before running the sample App.  
+For example, if you wanted to create 3 incident response spaces using the existing default prefix, you could use the Admin user to create 
+spaces titled "ResponseConf1", "ResponseConf2" and "ResponseConf3" and mark them as "moderated" as you create them that that admin user appears as a moderator for the spaces.  
+
+All users that you want to be able to manage incident response conferences must be members of a separate space created with a user with the Webex Admin role 
+you intend to use below to log in which needs to have the title specified in the 
+INCIDENT_RESPONDERS_SPACE_NAME constant of your copy of the server.py script. It's default value is "Incident_Responders_Members" but you can change 
+it before running the sample app. It is a good idea to mark that space as moderated by the admin user that created it and perhaps other members you trust 
+to manage it so that not anyone in the organization can add responders.   
+
+To get started, you can select existing spaces with members already in the space as long as you make the admin user a moderator and change the title to 
+start with the value in the INCIDENT_SPACE_NAMES_PREFIX constant, the sample application will 
 consolidate those users with it's own database so that when you edit it within the web interface consistency is maintained.  
 
 
@@ -104,6 +118,15 @@ database schema so there is no danger of leaving the DB in an erroneous state an
 the sample will reconstruct the list of users that belong to spaces from what it sees in Webex itself; only the external incident responder 
 data will be lost if you delete the DN file.  
 
+### Directory caching in internal database
+To optimize the use of the organizations directory withoug loading it from the Webex Cloud often, the sample application 
+creates a copy of just the fields it needs for all users you might want to add as responders. This local table or "cache" 
+will only be re-loaded from the Webex cloud after the amount of seconds specified in the DIR_AGE_REFRESH constant in the server.py 
+script has passed since the last reload. The default value is set to 86400 seconds (24 hours) but you can change it if you wish for it 
+to pick up possible directory changes more often. The re-load will not occur exactly when the number of seconds specified in that constant 
+passes after the last refresh, but rather the next operation that requires the full directory will check and re-load if needed. This means that 
+any incident responder room moderators will percieve a delay in loading a selected space if they are the next one to request it once the 
+seconds specified in DIR_AGE_REFRESH have passed since the last reload.  
 
 ## Usage
 
@@ -123,7 +146,7 @@ it expires beyond refresh , the application with just prompt you to have the adm
 Be sure to clear out the **tokens.json** file when you are done using the sample so you do not leave unsecured token credentials in some 
 test server. When creating production code using this sample as a reference, be sure to store in a more secure manner and fully encrypted. 
 
-Once a moderator is authenticated, you will be presented with a list of spaces for which you are a moderator:
+Once a responder spaces moderator is authenticated, you will be presented with a list of spaces for which you can administer incidents:
 
 ![IMAGES/SelectSpace.png](IMAGES/SelectSpace.png)  
 
@@ -135,27 +158,37 @@ You will now be presented with the main Incident Response Conference page where 
 
 ![IMAGES/IncidentConfSpace.png](IMAGES/IncidentConfSpace.png)  
 
-- Add Webex User incident responders from the list of all members of the organization. You can filter the list by entering at least the 
-first 3 characters of the Full Name of the person you are looking for in the search bar and pressing Enter. 
-Press Enter on an empty search field to return to the full directory. 
-- Add external incident responders from a list that you can add members to. These are not Webex Users but need to have a least a name and either a mobile number 
-or a voice number. 
-- Edit external incident responders in the list. Any changes will affect those already added to the responders in the space. 
-- Remove incident responders from the space
+- Add internal incident responders (Webex users in your organization) from the list of all members of the organization to the list of incident responders in the space 
+by clicking on the green Plus icon that appears when you hover over the row for a particular responder. You can filter the list by entering a portion of  
+the Full Name of the person you are looking for in the search bar and pressing Enter or clicking on search icon. Click on the search icon 
+or press Enter on an empty search field to return to the full directory.  
+- Add External incident responders from the list of available external responders to the list of incident responders in the space by clicking on the green Plus icon 
+that appears when you hover over the row for a particular responder. These are not necesarily Webex Users and need 
+to have a least a name and either a mobile number or a voice number when you create them (see below). You can filter the list of External responders by entering a portion of  
+the name of the person you are looking for in the search bar and pressing Enter or clicking on search icon. Click on the search icon 
+or press Enter on an empty search field to return to the full list.
+- Create External incident responder users to add to the list by clicking on the person icon with a plus sign to the right of the external responders search field, 
+filling out the "Add External Responder" form and clicking Ok. 
+- Edit external incident responders in the list by hovering over their row and clicking on the pencil icon to make changes using the "Edit External Responder" form 
+and clicking Ok. Any changes will affect those already added 
+to the responders in the space and any other spaces you or someone else might have added them to.  
+- Remove external incident responders by hovering over their row in the list and clicking on the trash icon. This will also remove them from the current 
+space you are managing and any other spaces they might have been added to by others.   
+- Remove incident responders from the space by hovering over their row in the list at the bottom and clicking on the trash icon.  
 - Toggle notification mechanism for each responder in the space by hovering over the row with their name. You can click on the SMS or Phone icon 
-to toggle using that as a mechanism no notifying the (Phone icon means it will place a voice call to remind them)
+to toggle using that as a mechanism no notifying the (Phone icon means it will place a voice call to remind them)  
 - Start an incident response conference. This opens a new tab in the browser you are using and redirects you to a page that 
 lets you start the meeting using an installed Webex App.  It also triggers a back end process in the sample code that will send the
  join information to all members of the incident response space via Webex Message and all of those external responders that are not 
 Webex Users will recive an SMS message sent to their mobile number and, if a voice only number is configured, they will receive a call 
 that will spell out the meeting number and phone number to call using text to speech.  
-- Send a reminder notification to individual responders in the space by overing the mouse cursor above the row for the responder in the list 
+- Send a reminder notification to individual responders in the space by hovering the mouse cursor above the row for the responder in the list 
 and clicking on the blue paper airplane icon to re-send an invitation. Don't forget to toggle SMS or Phone icons as needed if you want to modify 
 how they are being notified. By default, if the responder is internal or external with an email address, the application will also send them a 
-Webex message. 
+Webex message.  
 - Stop an incident response conference by removing all members of the space which kicks them off of the response conference. It also clears 
-the name of the incident
-- You can return to the list of spaces for which you are a moderator by clicking on the "Done" button.  
+the name of the incident and returns you to the list of spaces that you are allowed to manage fo you to select one to work on.
+- You can alse return to the list of spaces that you are allowed to manage without Stopping a conference by clicking on the "Done" button.  
 
 
 ### LICENSE

@@ -61,9 +61,12 @@ voice_msg_template = 'Hello, incident titled ${incName} requires your participat
 AUTHORIZATION_BASE_URL = 'https://api.ciscospark.com/v1/authorize'
 TOKEN_URL = 'https://api.ciscospark.com/v1/access_token'
 SCOPE = 'spark:all'
-ADMIN_SCOPE = ['spark-admin:people_read', 'spark-admin:telephony_config_read', 'spark-admin:organizations_read' , 'spark-admin:roles_read']
+ADMIN_SCOPE = ['spark:all','spark-admin:people_read', 'spark-admin:telephony_config_read', 'spark-admin:organizations_read' , 'spark-admin:roles_read']
 
 DISABLE_SSL_VERIFY=False
+DIR_AGE_REFRESH=86400 # age in seconds of last directory load that triggers a refresh, default 86400
+INCIDENT_RESPONDERS_SPACE_NAME="Incident_Responders_Members"
+INCIDENT_SPACE_NAMES_PREFIX="Response"
 
 #initialize variables for URLs
 #REDIRECT_URL must match what is in the integration, but we will construct it below in __main__
@@ -107,12 +110,28 @@ class Spaces(db.Model):
     responders = db.relationship("Responders",
                                secondary=member_identifier)
 
+class Wbx_Directory(db.Model):
+    __tablename__ = 'directory'
+    users_id = db.Column(db.Integer, primary_key=True)
+    displayname = db.Column(db.String(255))
+    wbxpersonID = db.Column(db.String(255))
+    email = db.Column(db.String(255))
+    mobilenumber = db.Column(db.String(255))
+    voicenumber = db.Column(db.String(255))
+
+class Timestamps(db.Model):
+    __tablename__ = 'timestamps'
+    timestamps_id = db.Column(db.String(255), primary_key=True)
+    value = db.Column(db.Integer)
+
 # will not create tables if already there
 db.create_all()
 
 app.secret_key = '123456789012345678901234'
 #api = WebexTeamsAPI(access_token=TEST_TEAMS_ACCESS_TOKEN)
 api = None
+
+adminAPI=None
 
 @app.route("/")
 def login():
@@ -227,6 +246,7 @@ def started():
 
     # Use returned token to make Teams API calls for information on user, list of spaces and list of messages in spaces
     global api
+    global adminAPI
 
     teams_token = session['oauth_token']
     api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
@@ -270,33 +290,116 @@ def started():
     modID=theResult.id
     session['modID'] = modID
 
-    #retrieve memberships to see which spaces this user is a moderator of
-    theMemberships=api.memberships.list()
+    
 
+    #now use the admin token to list all spaces and filter by name starting with INCIDENT_SPACE_NAMES_PREFIX
+    admin_teams_token=session['adminToken']
+    adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+    print("About to obtain all rooms...")
+    theSpaces=adminApi.rooms.list(type="group")
+    print("obtained all rooms...")
     moderatedRooms=[]
-    for membership in theMemberships:
-        if membership.isModerator:
-            roomId=membership.roomId
-            theRoom=api.rooms.get(roomId)
-            theRoomTitle=theRoom.title
-            moderatedRooms.append({'id':roomId,'title':theRoomTitle})
+    for theSpace in theSpaces:
+        if theSpace.title==INCIDENT_RESPONDERS_SPACE_NAME:
+            inc_responders_space_id=theSpace.id
+        if theSpace.title.startswith(INCIDENT_SPACE_NAMES_PREFIX):
+            moderatedRooms.append({'id':theSpace.id,'title':theSpace.title})
+
+
+    #check if the person logged in is a member of the space with title INCIDENT_RESPONDERS_SPACE_NAME 
+    #otherwise, they cannot use this interface
+    print("Checking memberships of logged in person...")
+    theMemberships=adminApi.memberships.list(roomId=inc_responders_space_id, personID=modID)
+    print(f'Obtained memberships for the logged in person: ${theMemberships} ')
+    print(f'inc_responders_space_id=${inc_responders_space_id}')
+    found=False
+    for aMember in theMemberships:
+        if (aMember.personId==modID):
+            found=True
+            break
+    if not found:
+        print("User not in responders space trying to log in..")
+        return render_template("not_responder.html", respondersSpace=INCIDENT_RESPONDERS_SPACE_NAME)
+
 
     #print(moderatedRooms)
     return render_template("select_space.html", moderatorName=theResult.displayName , moderatedRooms=moderatedRooms)
+
+
+
+def refresh_directory():
+
+    global adminAPI
+    last_refresh=Timestamps.query.filter_by(timestamps_id="last_dir_load").first()
+    # exit out of function if there is not refresh timestamp or it indicates
+    # that the direcory was loaded less than DIR_AGE_REFRESH ago
+    if (last_refresh!=None and int(time.time())-last_refresh.value<DIR_AGE_REFRESH):
+        print("Directory table is not old enough to reload....")
+        return
+
+    print("Reloading directory table...")
+
+    #delete all rows from existing table
+    db.session.query(Wbx_Directory).delete()
+    db.session.commit()
+
+    #Fill available responders to select from or directory
+    admin_teams_token=session['adminToken']
+    adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+    
+    #retrieve the person ID of the Admin
+    theResult=adminApi.people.me()
+    adminID=theResult.id
+
+    fullDirectory = adminApi.people.list()
+
+    team=[]
+    for entry in fullDirectory:
+        if entry.id!=adminID: #skip the admin
+            entryPhoneMobile=''
+            entryPhoneVoice = ''
+            sms_type = os.getenv('INT_PHONE_TYPE_SMS')
+            voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
+            if entry.phoneNumbers():
+                for aNumber in entry.phoneNumbers():
+                    print(f"Numbers found for {entry.displayName}: {aNumber['type']} {aNumber['value']} ")
+                    if aNumber['type'] == sms_type:
+                        entryPhoneMobile = aNumber['value']
+                    if aNumber['type'] == voice_type:
+                        entryPhoneVoice = aNumber['value']
+            the_dir_entry=Wbx_Directory(displayname=entry.displayName,
+                                        wbxpersonID=entry.id,
+                                        email=entry.emails[0],
+                                        mobilenumber=entryPhoneMobile,
+                                        voicenumber=entryPhoneVoice)
+            db.session.add(the_dir_entry)
+
+    #update time stamp of latest changes
+    if (last_refresh==None):
+        last_refresh=Timestamps(timestamps_id="last_dir_load", value=int(time.time()))
+        db.session.add(last_refresh)
+    else:
+        last_refresh.value=int(time.time())
+    #commit DB changes
+    db.session.commit()
 
 
 @app.route("/space_selected" , methods=['GET', 'POST'])
 def space_selected(operation=None):
     if operation==None:
         roomID = str(request.form.get('space_select'))
+        refresh_directory() # only re-load full directory when someone uses to the space selector form
     else:
         roomID=session['roomID']
 
     print(roomID)
     global api
+    global adminAPI
 
     #retrieve token from session
     teams_token = session['oauth_token']
+    admin_teams_token=session['adminToken']
+
 
     #retieve teamID we are working with
     #teamID=session['teamID']
@@ -304,6 +407,31 @@ def space_selected(operation=None):
     #store away the roomID we are working on at the moment
     session['roomID'] = roomID
     api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+
+    #retrieve the person ID of the Admin
+    adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+    theResult=adminApi.people.me()
+    adminID=theResult.id
+
+    #check room membership, if current user not a member, then add them as a member and moderator
+    # if they are a member but not a moderator, make them a moderator
+    if operation==None:
+        theMembershipList=adminApi.memberships.list(roomId=roomID)
+        found=False
+        for aMembership in theMembershipList:
+            if (aMembership.personId==session['modID']):
+                found=True
+                print("Already a member of the space, checking if moderator...")
+                if not aMembership.isModerator:
+                    print("Not a moderator, changing to moderator....")
+                    adminApi.memberships.update(membershipId=aMembership.id,isModerator=True)
+                break
+        if not found:
+            print("Did not find user in space, adding them as moderator....")
+            myPersonID=session['modID']
+            adminApi.memberships.create(roomId=roomID,personId=myPersonID,isModerator=True)
+
+
 
     theRoom=api.rooms.get(roomID)
     space_name=theRoom.title
@@ -323,54 +451,56 @@ def space_selected(operation=None):
 
     #iterate theMember in theMemberships
     for theMember in theMemberships:
-        found=False
-        for a_responder in the_space.responders:
-            # if theMember is also one of the responders of the_space by comparing email address
-            # but the responder does not have a webex person ID,
-            # then copy WbxID and Name from theMember into that responder and update responders table with it.
-            # if it does have a webex person ID then we are good, we just mark it as found and move on
-            if a_responder.email==theMember.personEmail:
-                found=True
-                if a_responder.wbxpersonID=="":
-                    a_responder.wbxpersonID=theMember.personId
-                    a_responder.name=theMember.personDisplayName
-            # if also one of the responders of the_space by comparing WbxIDs, take no action
+        if theMember.personId!=adminID: #make sure we ignore the admin as members of spaces
+            found=False
+            for a_responder in the_space.responders:
+                # if theMember is also one of the responders of the_space by comparing email address
+                # but the responder does not have a webex person ID,
+                # then copy WbxID and Name from theMember into that responder and update responders table with it.
+                # if it does have a webex person ID then we are good, we just mark it as found and move on
+                if a_responder.email==theMember.personEmail:
+                    found=True
+                    if a_responder.wbxpersonID=="":
+                        a_responder.wbxpersonID=theMember.personId
+                        a_responder.name=theMember.personDisplayName
+                # if also one of the responders of the_space by comparing WbxIDs, take no action
 
 
-        #if a webex space member not found as a responder in the_space in the DB by either email of WbxID, then
-        # look for it in the entire responders table.
-        if not found:
-            another_responder=Responders.query.filter_by(wbxpersonID=theMember.personId).first()
-            # if not there, create a new one
-            if another_responder==None:
-                #add phone number below as per the Webex person object if there and
-                # if user is in the same org of that person and has right to see phone numbers
-                the_person = api.people.get(theMember.personId)
-                # pull mobile phone info from the person object to add to DB if available
-                the_person_mobile = None
-                the_person_voice = None
-                sms_type = os.getenv('INT_PHONE_TYPE_SMS')
-                voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
-                if the_person.phoneNumbers():
-                    for aNumber in the_person.phoneNumbers():
-                        if aNumber['type'] == sms_type:  # i.e. "mobile":
-                            the_person_mobile = aNumber['value']
-                        if aNumber['type'] == voice_type:  # i.e. "work":
-                            the_person_voice = aNumber['value']
+            #if a webex space member not found as a responder in the_space in the DB by either email of WbxID, then
+            # look for it in the entire responders table.
+            if not found:
+                another_responder=Responders.query.filter_by(wbxpersonID=theMember.personId).first()
+                # if not there, create a new one
+                if another_responder==None:
+                    #add phone number below as per the Webex person object if there and
+                    # if user is in the same org of that person and has right to see phone numbers
+                    the_person = api.people.get(theMember.personId)
+                    # pull mobile phone info from the person object to add to DB if available
+                    the_person_mobile = None
+                    the_person_voice = None
+                    sms_type = os.getenv('INT_PHONE_TYPE_SMS')
+                    voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
+                    if the_person.phoneNumbers():
+                        for aNumber in the_person.phoneNumbers():
+                            if aNumber['type'] == sms_type:  # i.e. "mobile":
+                                the_person_mobile = aNumber['value']
+                            if aNumber['type'] == voice_type:  # i.e. "work":
+                                the_person_voice = aNumber['value']
 
-                another_responder = Responders(wbxpersonID=theMember.personId,
-                                               name=theMember.personDisplayName,
-                                               email=theMember.personEmail,
-                                               mobilenumber=the_person_mobile,
-                                               voicenumber=the_person_voice,
-                                               sendSMS=False,
-                                               sendVoice=False)
-                db.session.add(another_responder)
-            # add it to the_space (either newly created or if found)
-            the_space.responders.append(another_responder)
+                    another_responder = Responders(wbxpersonID=theMember.personId,
+                                                name=theMember.personDisplayName,
+                                                email=theMember.personEmail,
+                                                mobilenumber=the_person_mobile,
+                                                voicenumber=the_person_voice,
+                                                sendSMS=False,
+                                                sendVoice=False)
+                    db.session.add(another_responder)
+                # add it to the_space (either newly created or if found)
+                the_space.responders.append(another_responder)
 
     #add the person ID being processed to our list to clean out the_space later:
-        memberIDs.append(theMember.personId)
+        if theMember.personId!=adminID:
+            memberIDs.append(theMember.personId)
 
     #commit DB changes
     db.session.commit()
@@ -405,7 +535,17 @@ def space_selected(operation=None):
 
     #initialize list to send to page with externals
     externals=[]
-    the_ext_responders=Responders.query.filter_by(wbxpersonID=None)
+    # only trigger partial search if a search term was passed in variable operation and is at least
+    # three characters long since the people.list() method requires it
+    if (operation!=None and operation[:7]=='extfnd:' and len(operation)>7 ):
+        the_ext_responders=Responders.query.filter(Responders.name.contains(operation.split('extfnd:',1)[1]) , Responders.wbxpersonID==None)
+
+    else:
+        the_ext_responders=Responders.query.filter_by(wbxpersonID=None)
+
+
+    #the_ext_responders=Responders.query.filter_by(wbxpersonID=None)
+
     for ext_responder in the_ext_responders:
         externals.append({'extID':ext_responder.responders_id,
                         'extName':ext_responder.name,
@@ -417,36 +557,28 @@ def space_selected(operation=None):
 
 
     #Fill available responders to select from or directory
-    admin_teams_token=session['adminToken']
     adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
     # only trigger partial search if a search term was passed in variable operation and is at least
     # three characters long since the people.list() method requires it
-    if (operation!=None and operation[:7]=='search:' and len(operation)>10 ):
-        fullDirectory=adminApi.people.list(displayName=operation.split('search:',1)[1])
+    if (operation!=None and operation[:7]=='search:' and len(operation)>7 ):
+        #fullDirectory=adminApi.people.list(displayName=operation.split('search:',1)[1])
+        fullDirectory=Wbx_Directory.query.filter(Wbx_Directory.displayname.contains(operation.split('search:',1)[1]))
     else:
-        fullDirectory=adminApi.people.list()
+        #fullDirectory=adminApi.people.list()
+        fullDirectory=Wbx_Directory.query.all()
+
+
+
 
     team=[]
     for entry in fullDirectory:
-        entryPhoneMobile=''
-        entryPhoneVoice = ''
-        sms_type = os.getenv('INT_PHONE_TYPE_SMS')
-        voice_type = os.getenv('INT_PHONE_TYPE_VOICE')
-        if entry.phoneNumbers():
-            for aNumber in entry.phoneNumbers():
-                print(f"Numbers found for {entry.displayName}: {aNumber['type']} {aNumber['value']} ")
-                if aNumber['type'] == sms_type:
-                    entryPhoneMobile = aNumber['value']
-                if aNumber['type'] == voice_type:
-                    entryPhoneVoice = aNumber['value']
-
-        team.append({'personId':entry.id,
-                        'personEmail':entry.emails[0],
-                        'personDisplayName':entry.displayName,
-                        'personInitials': ''.join(i[0] for i in entry.displayName.split()).upper(),
-                        'personPhoneMobile': entryPhoneMobile,
-                        'personPhoneVoice': entryPhoneVoice
+        team.append({'personId':entry.wbxpersonID,
+                        'personEmail':entry.email,
+                        'personDisplayName':entry.displayname,
+                        'personInitials': ''.join(i[0] for i in entry.displayname.split()).upper(),
+                        'personPhoneMobile': entry.mobilenumber,
+                        'personPhoneVoice': entry.voicenumber
                         })
 
     return render_template("index.html",team=team, space_name=space_name, inc_name=the_space.incidentname, members=members, externals=externals, smsorigin=os.getenv('SMS_ORIGIN'))
@@ -519,6 +651,7 @@ def send_Voice_msg(voiceNumber, meetingNumber, callInTollNumber, theIncidentName
 @app.route("/start_conference", methods=['GET', 'POST'])
 def start_conference():
     global api
+    global adminAPI
 
     # retrieve token from session
     teams_token = session['oauth_token']
@@ -589,16 +722,20 @@ def start_conference():
 
 @app.route("/end_conference", methods=['GET', 'POST'])
 def end_conference():
-    global api
-
+    #global api
+    global adminAPI
     # retrieve token from session
-    teams_token = session['oauth_token']
+    #teams_token = session['oauth_token']
 
     # retrieve roomID we are working with
     roomID = session['roomID']
 
-    api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+    #api = WebexTeamsAPI(access_token=teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
 
+    admin_teams_token=session['adminToken']
+    adminApi = WebexTeamsAPI(access_token=admin_teams_token['access_token'], disable_ssl_verify=DISABLE_SSL_VERIFY)
+    theResult=adminApi.people.me()
+    adminID=theResult.id
 
     the_space = Spaces.query.filter_by(wbxspaceID=roomID).first()
 
@@ -616,7 +753,7 @@ def end_conference():
         #remove from the_space each responder and then remove them from actual Webex room
 
         #remove responder from the_space if they are not the moderator
-        if responder_to_del.wbxpersonID!=modID:
+        if responder_to_del.wbxpersonID!=adminID:    
             #the_space.responders.remove(responder_to_del)
             #mark responder for removal
             responders_to_remove.append(responder_to_del)
@@ -625,19 +762,20 @@ def end_conference():
             # actually have a webex personID (not just external)
             if responder_to_del.wbxpersonID != None:
                 # retrieve membership to delete
-                theMemberships = api.memberships.list(roomId=roomID, personId=responder_to_del.wbxpersonID)
+                theMemberships = adminApi.memberships.list(roomId=roomID, personId=responder_to_del.wbxpersonID)
                 for theMembership in theMemberships:
-                    api.memberships.delete(theMembership.id)
+                    adminApi.memberships.delete(theMembership.id)
                     print(f'Deleting user {responder_to_del.wbxpersonID} from space {roomID}')
         else:
-            print(f'Skipping due to {responder_to_del.name} being moderator....')
+            print(f'Skipping due to {responder_to_del.name} being admin....')
 
     for to_remove in responders_to_remove:
         the_space.responders.remove(to_remove)
         print(f'Disassociated member {to_remove.responders_id} from the space in DB')
 
     db.session.commit()
-    return space_selected(operation='EndConference')
+    #return space_selected(operation='EndConference')
+    return started()
 
 
 @app.route('/AddExternal')
@@ -660,6 +798,26 @@ def AddExternal():
     #alert_data = {'add_result':'added'}
     #return jsonify(result=alert_data)
     return space_selected(operation='AddExternal')
+
+@app.route('/DelExternal')
+def DelExternal():
+    print('In DelExernal')
+    external_id = request.args.get('ext_id', '')
+    print('External ID: ',external_id)
+    the_responder_delete= Responders.query.filter_by(responders_id=external_id).first()
+    if the_responder_delete!=None:
+        the_spaces = Spaces.query.all()
+        for the_space in the_spaces:
+            if the_responder_delete in the_space.responders:
+                the_space.responders.remove(the_responder_delete)
+                print(f'Disassociated responder {external_id} from space ID {the_space.wbxspaceID}')
+        db.session.delete(the_responder_delete)
+        print(f'Deleted responder ID {external_id}')
+        db.session.commit()
+    else:
+        print(f'Could not find responder ID {external_id} to delete')
+
+    return space_selected(operation='DelExternal')
 
 @app.route('/UpdateExternal')
 def UpdateExternal():
@@ -870,6 +1028,14 @@ def UpdateInternalsList():
     # global directory
     search_str = request.args.get('search_str', '')
     return space_selected(operation='search:'+search_str)
+
+@app.route('/UpdateExternalsList')
+def UpdateExternalsList():
+    print('In UpdateExternalsList')
+    # Here we just re-draw screen but specify a subset of users to retrieve from
+    # external responders
+    search_str = request.args.get('search_str', '')
+    return space_selected(operation='extfnd:'+search_str)
 
 @app.route('/UpdateIncName')
 def UpdateIncName():

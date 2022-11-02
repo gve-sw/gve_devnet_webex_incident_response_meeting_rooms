@@ -24,6 +24,22 @@ function addExternal(externalID)
    return false;
 }
 
+function delExternal(externalID)
+{
+    console.log("Passing external ID: ", externalID);
+
+    // we call /UpdateIncName in case they changed the incident name since we will refresh the
+    // whole form after doing this by redirecting to DelExternal
+   let incident_name=document.getElementById('incident-name').value
+   $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('DelExternal') }}"+"?ext_id="+externalID;
+            });
+   return false;
+
+}
 
 function editExternal(externalID)
 {
@@ -161,12 +177,62 @@ function internalsKeypress(e)
     let search_string=document.getElementById("internalsInput").value;
     let incident_name=document.getElementById('incident-name').value;
     console.log(`A key was pressed, value: ${e.which}`);
-    if (e.which==13 && (search_string=='' || search_string.length>=3)) {
+    if (e.which==13 && (search_string=='' || search_string.length>=1)) {
        $.getJSON('/UpdateIncName',
               { inc_name: incident_name },
               function(data) {
               console.log(data.result.update_inc_name_result);
               window.location.href="{{ url_for('UpdateInternalsList') }}"+"?search_str="+search_string;
+            });
+       return false;
+    }
+}
+
+function internalsSearchClick(e)
+{
+    let search_string=document.getElementById("internalsInput").value;
+    let incident_name=document.getElementById('incident-name').value;
+    console.log(`The internals search icon was clicked`);
+    if (search_string=='' || search_string.length>=1) {
+       $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('UpdateInternalsList') }}"+"?search_str="+search_string;
+            });
+       return false;
+    }
+}
+
+
+function externalsKeypress(e)
+{
+    let search_string=document.getElementById("externalsInput").value;
+    let incident_name=document.getElementById('incident-name').value;
+    console.log(`A key was pressed, value: ${e.which}`);
+    if (e.which==13 && (search_string=='' || search_string.length>=1)) {
+       $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('UpdateExternalsList') }}"+"?search_str="+search_string;
+            });
+       return false;
+    }
+}
+
+
+function externalsSearchClick(e)
+{
+    let search_string=document.getElementById("externalsInput").value;
+    let incident_name=document.getElementById('incident-name').value;
+    console.log(`The externals search icon was clicked`);
+    if (search_string=='' || search_string.length>=1) {
+       $.getJSON('/UpdateIncName',
+              { inc_name: incident_name },
+              function(data) {
+              console.log(data.result.update_inc_name_result);
+              window.location.href="{{ url_for('UpdateExternalsList') }}"+"?search_str="+search_string;
             });
        return false;
     }
@@ -182,7 +248,11 @@ function startConference()
     console.log("Starting conference ...");
 
     let incident_name=document.getElementById('incident-name').value
-    window.open("{{ url_for('start_conference') }}"+"?inc_name="+incident_name,"_blank");
+
+    if (incident_name=='')
+            alert("Please fill out the Incident name field");
+        else 
+            window.open("{{ url_for('start_conference') }}"+"?inc_name="+incident_name,"_blank");
 
 }
 function selectNewSpace()
@@ -359,7 +429,7 @@ function selectAllMembers(selectAButton)
                     <div class="md-input-container">
                         <div class="md-input__wrapper">
                             <span class="md-input__before">
-                                <i class="md-icon icon icon-search_20" style="font-size: 20px;"></i>
+                                <i class="md-icon icon icon-search_20" id="internalsSearch" onclick="internalsSearchClick(event)" style="font-size: 20px;"></i>
                             </span>
                             <input class="md-input md-input--before" tabindex="0" type="text" id="internalsInput" onkeypress="internalsKeypress(event)" aria-autocomplete="list"
                                 value="">
@@ -440,9 +510,9 @@ function selectAllMembers(selectAButton)
                     <div class="md-input-container">
                         <div class="md-input__wrapper">
                             <span class="md-input__before">
-                                <i class="md-icon icon icon-search_20" style="font-size: 20px;"></i>
+                                <i class="md-icon icon icon-search_20" id="externalsSearch" onclick="externalsSearchClick(event)" style="font-size: 20px;"></i>
                             </span>
-                            <input class="md-input md-input--before" tabindex="0" type="text" aria-autocomplete="list"
+                            <input class="md-input md-input--before" tabindex="0" type="text" id="externalsInput" onkeypress="externalsKeypress(event)" aria-autocomplete="list"
                                 value="">
                             <button id="addExtBtn" class="md-input__after" style="border: none">
                                 <i class="md-icon icon icon-participant-add_20" style="font-size: 20px;"></i>
@@ -480,6 +550,14 @@ function selectAllMembers(selectAButton)
                                 alt="edit user" type="button" aria-label="edit user" title="Edit" style="background-color: white;">
                                 <span class="md-button__children">
                                     <i class="icon icon-edit_24" style="color: #121212"></i>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="md-button__container--small hidden-add-button">
+                            <button onclick="delExternal('{{external.extID}}')" class="md-button md-button--circle md-button--56 md-activity md-activity__tasks"
+                                alt="remove user" type="button" aria-label="Remove" title="Remove" style="background-color: white;">
+                                <span class="md-button__children">
+                                    <i class="icon icon-delete_24" style="color: #f7644a"></i>
                                 </span>
                             </button>
                         </div>
